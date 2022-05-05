@@ -1,6 +1,7 @@
 
 
 from setuptools import setup, find_packages
+
 # To use a consistent encoding
 from os import path
 
@@ -49,7 +50,7 @@ setup(
         #   3 - Alpha
         #   4 - Beta
         #   5 - Production/Stable
-        'Development Status :: 7 - Inactive',
+        'Development Status :: 3 - Inactive',
 
         # Indicate who your project is intended for
         'Intended Audience :: Science/Research',

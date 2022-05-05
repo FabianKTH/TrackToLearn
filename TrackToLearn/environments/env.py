@@ -1,26 +1,25 @@
 import functools
 import h5py
-import os
-
 import numpy as np
 import nibabel as nib
 import torch
 
 from nibabel.streamlines import Tractogram
-from os.path import join as pjoin
 from typing import Callable, Dict, Tuple
 
 from TrackToLearn.datasets.utils import (
     convert_length_mm2vox,
+    MRIDataVolume,
     TractographyData,
 )
 from TrackToLearn.environments.utils import (
     get_neighborhood_directions,
     get_sh,
-    is_looping,
+    # is_looping,
+    has_reached_gm,
     is_too_curvy,
-    is_outside_mask,
     is_too_long,
+    is_outside_mask,
     StoppingFlags)
 
 
@@ -32,8 +31,12 @@ class BaseEnv(object):
 
     def __init__(
         self,
-        dataset_file: str,
-        subject_id: str,
+        input_volume: MRIDataVolume,
+        tracking_mask: MRIDataVolume,
+        exclude_mask: MRIDataVolume,
+        target_mask: MRIDataVolume,
+        seeding_mask: MRIDataVolume,
+        peaks: MRIDataVolume,
         n_signal: int = 1,
         n_dirs: int = 4,
         step_size: float = 0.2,
@@ -42,6 +45,12 @@ class BaseEnv(object):
         max_length: float = 200,
         n_seeds_per_voxel: int = 4,
         rng: np.random.RandomState = None,
+        alignment_weighting: float = 1.,
+        straightness_weighting: float = 0.0,
+        length_weighting: float = 0.0,
+        target_bonus_factor: float = 1.0,
+        exclude_penalty_factor: float = -1.0,
+        angle_penalty_factor: float = -1.0,
         add_neighborhood: float = 1.5,
         compute_reward: bool = True,
         device=None
@@ -78,6 +87,18 @@ class BaseEnv(object):
             How many seeds to generate per voxel
         rng : `numpy.random.RandomState`
             Random number generator
+        alignment_weighting: float
+            Reward coefficient for alignment with local odfs peaks
+        straightness_weighting: float
+            Reward coefficient for streamline straightness
+        length_weighting: float
+            Reward coefficient for streamline length
+        target_bonus_factor: `float`
+            Bonus for streamlines reaching the target mask
+        exclude_penalty_factor: `float`
+            Penalty for streamlines reaching the exclusion mask
+        angle_penalty_factor: `float`
+            Penalty for looping or too-curvy streamlines
         add_neighborhood: float
             Use signal in neighboring voxels for model input
         device: torch.device
@@ -85,11 +106,9 @@ class BaseEnv(object):
             Should always be GPU
         """
 
-        (input_volume, tracking_mask, exclude_mask, target_mask,
-         seeding_mask, peaks) = \
-            self._load_dataset(dataset_file, subject_id)
-
         # Volumes and masks
+        self.reference = input_volume
+
         self.data_volume = torch.tensor(
             input_volume.data, dtype=torch.float32, device=device)
         self.tracking_mask = tracking_mask
@@ -98,13 +117,17 @@ class BaseEnv(object):
         self.exclude_mask = exclude_mask
         self.peaks = peaks
         # Tracking parameters
-        self.step_size = step_size
         self.n_signal = n_signal
         self.n_dirs = n_dirs
         self.max_angle = max_angle
-        self.min_length = int(np.ceil(min_length / step_size))
-        self.max_length = int(np.ceil(max_length / step_size))
 
+        # Reward parameters
+        self.alignment_weighting = alignment_weighting
+        self.straightness_weighting = straightness_weighting
+        self.length_weighting = length_weighting
+        self.target_bonus_factor = target_bonus_factor
+        self.exclude_penalty_factor = exclude_penalty_factor
+        self.angle_penalty_factor = angle_penalty_factor
         self.compute_reward = compute_reward
 
         self.rng = rng
@@ -116,10 +139,8 @@ class BaseEnv(object):
         input_dv_affine_vox2rasmm = input_volume.affine_vox2rasmm
         mask_data = tracking_mask.data.astype(np.uint8)
 
-        if seeding_mask is None:
-            seeding_data = tracking_mask.data.astype(np.uint8)
-        else:
-            seeding_data = seeding_mask.data.astype(np.uint8)
+        seeding_data = seeding_mask.data.astype(np.uint8)
+
         # Compute the affine to align dwi voxel coordinates with
         # mask voxel coordinates
         affine_rasmm2maskvox = np.linalg.inv(tracking_mask.affine_vox2rasmm)
@@ -128,7 +149,14 @@ class BaseEnv(object):
         affine_dwivox2maskvox = np.dot(
             affine_rasmm2maskvox,
             input_dv_affine_vox2rasmm)
+
         self.affine_vox2mask = affine_dwivox2maskvox
+
+        self.step_size = convert_length_mm2vox(
+            step_size,
+            input_dv_affine_vox2rasmm)
+        self.min_length = min_length
+        self.max_length = max_length
 
         self.stopping_criteria[StoppingFlags.STOPPING_MASK] = \
             functools.partial(is_outside_mask,
@@ -136,21 +164,30 @@ class BaseEnv(object):
                               affine_vox2mask=affine_dwivox2maskvox,
                               threshold=0.5)
 
+        self.stopping_criteria[StoppingFlags.STOPPING_TARGET] = \
+            functools.partial(has_reached_gm,
+                              mask=target_mask.data,
+                              affine_vox2mask=affine_dwivox2maskvox,
+                              threshold=0.5,
+                              min_nb_steps=10)
+
         # Compute maximum length
-        max_nb_steps = self.max_length
+        self.max_nb_steps = int(self.max_length / step_size)
+        self.min_nb_steps = int(self.min_length / step_size)
+
         self.stopping_criteria[StoppingFlags.STOPPING_LENGTH] = \
             functools.partial(is_too_long,
-                              max_nb_steps=max_nb_steps)
+                              max_nb_steps=self.max_nb_steps)
 
         self.stopping_criteria[
             StoppingFlags.STOPPING_CURVATURE] = \
             functools.partial(is_too_curvy,
                               max_theta=max_angle)
 
-        self.stopping_criteria[
-            StoppingFlags.STOPPING_LOOP] = \
-            functools.partial(is_looping,
-                              loop_threshold=1750)
+        # self.stopping_criteria[
+        #     StoppingFlags.STOPPING_LOOP] = \
+        #     functools.partial(is_looping,
+        #                       loop_threshold=300)
 
         # Convert neighborhood to voxel space
         self.add_neighborhood_vox = None
@@ -172,7 +209,6 @@ class BaseEnv(object):
             affine_rasmm2dwivox, affine_seedsvox2rasmm)
         self.affine_vox2rasmm = input_dv_affine_vox2rasmm
         self.affine_rasmm2vox = np.linalg.inv(self.affine_vox2rasmm)
-
         # Tracking seeds
         self.seeds = self._get_tracking_seeds_from_mask(
             seeding_data,
@@ -180,7 +216,138 @@ class BaseEnv(object):
             n_seeds_per_voxel,
             self.rng)
 
-    def _load_dataset(self, dataset_file, subject_id):
+    @classmethod
+    def from_dataset(
+        cls,
+        dataset_file: str,
+        subject_id: str,
+        gm_seeding: bool = False,
+        n_signal: int = 1,
+        n_dirs: int = 4,
+        step_size: float = 0.2,
+        max_angle: float = 45,
+        min_length: float = 10,
+        max_length: float = 200,
+        n_seeds_per_voxel: int = 4,
+        rng: np.random.RandomState = None,
+        alignment_weighting: float = 1.,
+        straightness_weighting: float = 0.0,
+        length_weighting: float = 0.0,
+        target_bonus_factor: float = 1.0,
+        exclude_penalty_factor: float = -1.0,
+        angle_penalty_factor: float = -1.0,
+        add_neighborhood: float = 1.5,
+        compute_reward: bool = True,
+        device=None
+    ):
+        (input_volume, tracking_mask, exclude_mask, target_mask,
+         seeding_mask, peaks) = \
+            BaseEnv._load_dataset(dataset_file, subject_id)
+
+        if not gm_seeding and not seeding_mask:
+            seeding_mask = tracking_mask
+        elif not gm_seeding and seeding_mask:
+            seeding_mask = tracking_mask
+        elif gm_seeding and not seeding_mask:
+            seeding_mask = target_mask
+
+        return cls(
+            input_volume,
+            tracking_mask,
+            exclude_mask,
+            target_mask,
+            seeding_mask,
+            peaks,
+            n_signal=n_signal,
+            n_dirs=n_dirs,
+            step_size=step_size,
+            max_angle=max_angle,
+            min_length=min_length,
+            max_length=max_length,
+            n_seeds_per_voxel=n_seeds_per_voxel,
+            rng=rng,
+            alignment_weighting=alignment_weighting,
+            straightness_weighting=straightness_weighting,
+            length_weighting=length_weighting,
+            target_bonus_factor=target_bonus_factor,
+            exclude_penalty_factor=exclude_penalty_factor,
+            angle_penalty_factor=angle_penalty_factor,
+            add_neighborhood=add_neighborhood,
+            compute_reward=True,
+            device=device)
+
+    @classmethod
+    def from_files(
+        cls,
+        signal_file: str,
+        peaks_file: str,
+        seeding_file: str,
+        tracking_file: str,
+        target_file: str,
+        exclude_file: str,
+        gm_seeding: bool = False,
+        n_signal: int = 1,
+        n_dirs: int = 4,
+        step_size: float = 0.2,
+        max_angle: float = 45,
+        min_length: float = 10,
+        max_length: float = 200,
+        n_seeds_per_voxel: int = 4,
+        rng: np.random.RandomState = None,
+        alignment_weighting: float = 1.,
+        straightness_weighting: float = 0.0,
+        length_weighting: float = 0.0,
+        target_bonus_factor: float = 1.0,
+        exclude_penalty_factor: float = -1.0,
+        angle_penalty_factor: float = -1.0,
+        add_neighborhood: float = 1.5,
+        compute_reward: bool = True,
+        device=None
+    ):
+
+        (input_volume, tracking_mask, exclude_mask, target_mask,
+         seeding_mask, peaks) = \
+            BaseEnv._load_files(signal_file,
+                                peaks_file,
+                                seeding_file,
+                                tracking_file,
+                                target_file,
+                                exclude_file)
+
+        if not gm_seeding and not seeding_mask:
+            seeding_mask = tracking_mask
+        elif not gm_seeding and seeding_mask:
+            seeding_mask = tracking_mask
+        elif gm_seeding and not seeding_mask:
+            seeding_mask = target_mask
+
+        return cls(
+            input_volume,
+            tracking_mask,
+            exclude_mask,
+            target_mask,
+            seeding_mask,
+            peaks,
+            n_signal,
+            n_dirs,
+            step_size,
+            max_angle,
+            min_length,
+            max_length,
+            n_seeds_per_voxel,
+            rng,
+            alignment_weighting,
+            straightness_weighting,
+            length_weighting,
+            target_bonus_factor,
+            exclude_penalty_factor,
+            angle_penalty_factor,
+            add_neighborhood,
+            compute_reward,
+            device)
+
+    @classmethod
+    def _load_dataset(cls, dataset_file, subject_id):
         """ Load data volumes and masks from the HDF5
 
         Should everything be put into `self` ? Should everything be returned
@@ -217,6 +384,40 @@ class BaseEnv(object):
 
         return (input_volume, tracking_mask, exclude_mask,
                 target_mask, seeding, peaks)
+
+    @classmethod
+    def _load_files(
+        cls,
+        signal_file,
+        peaks_file,
+        seeding_file,
+        tracking_file,
+        target_file,
+        exclude_file
+    ):
+
+        signal = nib.load(signal_file)
+        peaks = nib.load(peaks_file)
+        seeding = nib.load(seeding_file)
+        tracking = nib.load(tracking_file)
+        target = nib.load(target_file)
+        exclude = nib.load(exclude_file)
+
+        signal_volume = MRIDataVolume(
+            signal.get_fdata(), signal.affine, filename=signal_file)
+        peaks_volume = MRIDataVolume(peaks.get_fdata(), peaks.affine,
+                                     filename=peaks_file)
+        seeding_volume = MRIDataVolume(
+            seeding.get_fdata(), seeding.affine, filename=seeding_file)
+        tracking_volume = MRIDataVolume(
+            tracking.get_fdata(), tracking.affine, filename=tracking_file)
+        target_volume = MRIDataVolume(
+            target.get_fdata(), target.affine, filename=target_file)
+        exclude_volume = MRIDataVolume(
+            exclude.get_fdata(), exclude.affine, filename=exclude_file)
+
+        return (signal_volume, tracking_volume, exclude_volume,
+                target_volume, seeding_volume, peaks_volume)
 
     def _get_tracking_seeds_from_mask(
         self,
@@ -273,9 +474,9 @@ class BaseEnv(object):
             SH coefficients at the coordinates
         """
         N, L, P = streamlines.shape
-
-        segments = streamlines[:, :-(self.n_signal + 1):-1, :]
-
+        if N <= 0:
+            return []
+        segments = streamlines[:, -1, :][:, None, :]
         signal = get_sh(
             segments,
             self.data_volume,
@@ -283,19 +484,24 @@ class BaseEnv(object):
             self.neighborhood_directions,
             self.n_signal,
             self.device
-        )
+        ).cpu().numpy()
+
+        N, S = signal.shape
+
+        inputs = np.zeros((N, S + (self.n_dirs * P)))
+
+        inputs[:, :S] = signal
 
         previous_dirs = np.zeros((N, self.n_dirs, P), dtype=np.float32)
         if L > 1:
-            dirs = streamlines[:, 1:, :] - streamlines[:, :-1, :]
+            dirs = np.diff(streamlines, axis=1)
             previous_dirs[:, :min(dirs.shape[1], self.n_dirs), :] = \
                 dirs[:, :-(self.n_dirs+1):-1, :]
 
-        dir_inputs = torch.reshape(torch.as_tensor(previous_dirs,
-                                                   device=self.device),
-                                   (N, self.n_dirs * P))
-        inputs = torch.cat((signal, dir_inputs), dim=-1).to(self.device)
-        return inputs.cpu().numpy()
+        dir_inputs = np.reshape(previous_dirs, (N, self.n_dirs * P))
+
+        inputs[:, S:] = dir_inputs
+        return inputs
 
     def _filter_stopping_streamlines(
         self,
@@ -361,12 +567,6 @@ class BaseEnv(object):
             self.streamlines[:, :self.length])
         return stopping_idx[(stopping_flags & flag) != 0]
 
-    def _keep():
-        """ Keep only streamlines corresponding to the given indices, and remove
-        all others. The model states will be updated accordingly.
-        """
-        pass
-
     def reset():
         """ Initialize tracking seeds and streamlines
         """
@@ -428,13 +628,9 @@ class BaseEnv(object):
 
         # Save or display scene
         if filename is not None:
-            directory = os.path.dirname(pjoin(self.experiment_path, 'render'))
-            if not os.path.exists(directory):
-                os.makedirs(directory)
-            dest = pjoin(directory, filename)
             window.snapshot(
                 scene,
-                fname=dest,
+                fname=filename,
                 offscreen=True,
                 size=(800, 800))
         else:

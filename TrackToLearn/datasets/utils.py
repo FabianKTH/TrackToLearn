@@ -7,10 +7,11 @@ class MRIDataVolume(object):
     such as the vox2rasmm affine or the subject_id.
     """
 
-    def __init__(self, data=None, affine_vox2rasmm=None, subject_id=None):
+    def __init__(self, data=None, affine_vox2rasmm=None, subject_id=None, filename=None):
         self._data = data
         self.affine_vox2rasmm = affine_vox2rasmm
         self.subject_id = subject_id
+        self.filename = filename
 
     @classmethod
     def from_hdf_group(cls, hdf_group):
@@ -77,16 +78,22 @@ class TractographyData(object):
     def from_hdf_subject(cls, hdf_subject):
         """ Create a TractographyData object from an HDF group object """
         input_dv = MRIDataVolume.from_hdf_group(hdf_subject['input_volume'])
+
         peaks = MRIDataVolume.from_hdf_group(hdf_subject['peaks_volume'])
         tracking = MRIDataVolume.from_hdf_group(hdf_subject['wm_volume'])
-        exclude = MRIDataVolume.from_hdf_group(hdf_subject['csf_volume'])
-        target = MRIDataVolume.from_hdf_group(hdf_subject['gm_volume'])
+        if 'csf_volume' in hdf_subject:
+            exclude = MRIDataVolume.from_hdf_group(hdf_subject['csf_volume'])
+        else:
+            exclude = np.zeros_like(tracking)
+        if 'gm_volume' in hdf_subject:
+            target = MRIDataVolume.from_hdf_group(hdf_subject['gm_volume'])
+        else:
+            target = np.zeros_like(tracking)
 
         seeding = None
         if 'seeding_volume' in hdf_subject:
             seeding = MRIDataVolume.from_hdf_group(
                 hdf_subject['seeding_volume'])
-
         lengths_mm = None
 
         return cls(

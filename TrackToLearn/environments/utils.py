@@ -5,6 +5,8 @@ from enum import Enum
 
 from scipy.ndimage.interpolation import map_coordinates
 
+from TrackToLearn.utils.utils import normalize_vectors
+
 
 B1 = np.array([[1, 0, 0, 0, 0, 0, 0, 0],
                [-1, 0, 0, 0, 1, 0, 0, 0],
@@ -49,7 +51,7 @@ def get_sh(
     """
 
     N, H, P = segments.shape
-    flat_coords = np.concatenate(segments, axis=0)
+    flat_coords = np.reshape(segments, (N * H, P))
 
     coords = torch.as_tensor(flat_coords).to(device)
     n_coords = coords.shape[0]
@@ -248,6 +250,43 @@ def get_neighborhood_directions(
     return directions
 
 
+def has_reached_gm(
+    streamlines: np.ndarray,
+    mask: np.ndarray,
+    affine_vox2mask: np.ndarray = None,
+    threshold: float = 0.,
+    min_nb_steps: int = 10
+):
+    """ Checks which streamlines have their last coordinates inside a mask and
+    are at least longer than a minimum strealine length.
+
+    Parameters
+    ----------
+    streamlines : `numpy.ndarray` of shape (n_streamlines, n_points, 3)
+        Streamline coordinates in voxel space
+    mask : 3D `numpy.ndarray`
+        3D image defining a stopping mask. The interior of the mask is defined
+        by values higher or equal than `threshold` .
+        NOTE: The mask coordinates can be in a different space than the
+        streamlines coordinates if an affine is provided.
+    affine_vox2mask : `numpy.ndarray` with shape (4,4) (optional)
+        Tranformation that aligns streamlines on top of `mask`.
+    threshold : float
+        Voxels with a value higher or equal than this threshold are considered
+        as part of the interior of the mask.
+    min_length: float
+        Minimum streamline length to end
+
+    Returns
+    -------
+    inside : 1D boolean `numpy.ndarray` of shape (n_streamlines,)
+        Array telling whether a streamline's can end after reaching GM.
+    """
+    return np.logical_and(is_inside_mask(
+        streamlines, mask, affine_vox2mask, threshold),
+        np.full(streamlines.shape[0], streamlines.shape[1] > min_nb_steps))
+
+
 def is_inside_mask(
     streamlines: np.ndarray,
     mask: np.ndarray,
@@ -278,13 +317,8 @@ def is_inside_mask(
         or not.
     """
     # Get last streamlines coordinates
-    indices_vox = streamlines[:, -1, :]
-
-    mask_values = interpolate_volume_at_coordinates(
-        mask, indices_vox, mode='constant')
-    inside = mask_values >= threshold
-
-    return inside
+    return interpolate_volume_at_coordinates(
+        mask, streamlines[:, -1, :], mode='constant', order=0) >= threshold
 
 
 def is_outside_mask(
@@ -318,13 +352,8 @@ def is_outside_mask(
     """
 
     # Get last streamlines coordinates
-    indices_vox = streamlines[:, -1, :]
-
-    mask_values = interpolate_volume_at_coordinates(
-        mask, indices_vox, mode='constant')
-    outside = mask_values < threshold
-
-    return outside
+    return interpolate_volume_at_coordinates(
+        mask, streamlines[:, -1, :], mode='constant', order=0) < threshold
 
 
 def is_too_long(streamlines: np.ndarray, max_nb_steps: int):
@@ -342,9 +371,7 @@ def is_too_long(streamlines: np.ndarray, max_nb_steps: int):
     too_long : 1D boolean `numpy.ndarray` of shape (n_streamlines,)
         Array telling whether a streamline is too long or not
     """
-    return (np.full(len(streamlines), True)
-            if streamlines.shape[1] >= max_nb_steps
-            else np.full(len(streamlines), False))
+    return np.full(streamlines.shape[0], streamlines.shape[1] >= max_nb_steps)
 
 
 def is_too_curvy(streamlines: np.ndarray, max_theta: float):
@@ -367,19 +394,14 @@ def is_too_curvy(streamlines: np.ndarray, max_theta: float):
     max_theta_rad = np.deg2rad(max_theta)  # Internally use radian
     if streamlines.shape[1] < 3:
         # Not enough segments to compute curvature
-        return np.zeros(len(streamlines), dtype=np.uint8)
+        return np.zeros(streamlines.shape[0], dtype=np.uint8)
 
     # Compute vectors for the last and before last streamline segments
-    u = streamlines[:, -1] - streamlines[:, -2]
-    v = streamlines[:, -2] - streamlines[:, -3]
-
-    # Normalize vectors
-    u /= np.sqrt(np.sum(u ** 2, axis=1, keepdims=True))
-    v /= np.sqrt(np.sum(v ** 2, axis=1, keepdims=True))
+    u = normalize_vectors(streamlines[:, -1] - streamlines[:, -2])
+    v = normalize_vectors(streamlines[:, -2] - streamlines[:, -3])
 
     # Compute angles
-    cos_theta = np.sum(u * v, axis=1).clip(-1., 1.)
-    angles = np.arccos(cos_theta)
+    angles = np.arccos(np.sum(u * v, axis=1).clip(-1., 1.))
 
     return angles > max_theta_rad
 

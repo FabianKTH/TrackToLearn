@@ -16,6 +16,10 @@ from TrackToLearn.environments.env import BaseEnv
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
+LOG_STD_MAX = 2
+LOG_STD_MIN = -20
+
+
 class ReplayBuffer(object):
     """ Replay buffer to store transitions. Implemented in a "ring-buffer"
     fashion. Efficiency could probably be improved
@@ -349,7 +353,7 @@ class ActorCritic(object):
         a, logprob = self.actor(state, stochastic)
         return a, logprob
 
-    def select_action(self, state: np.array, stochastic=True) -> np.ndarray:
+    def select_action(self, state: np.array, stochastic=False) -> np.ndarray:
         """ Move state to torch tensor, select action and
         move it back to numpy array
 
@@ -441,6 +445,9 @@ class SAC(RLAlgorithm):
     TODO: Cite
     Implementation is based on Spinning Up's and rlkit
 
+    See https://github.com/vitchyr/rlkit/blob/master/rlkit/torch/sac/sac.py
+    See https://github.com/openai/spinningup/blob/master/spinup/algos/pytorch/sac/sac.py  # noqa E501
+
     Some alterations have been made to the algorithms so it could be
     fitted to the tractography problem.
 
@@ -452,11 +459,11 @@ class SAC(RLAlgorithm):
         action_size: int = 3,
         hidden_size: int = 256,
         hidden_layers: int = 3,
-        action_std: float = 0.35,
         lr: float = 3e-4,
         gamma: float = 0.99,
         alpha: float = 0.2,
         batch_size: int = 2048,
+        gm_seeding: bool = False,
         rng: np.random.RandomState = None,
         device: torch.device = "cuda:0",
     ):
@@ -475,10 +482,10 @@ class SAC(RLAlgorithm):
             Learning rate for optimizer
         gamma: float
             Gamma parameter future reward discounting
-        alpha: float
-            Temperature parameter
         batch_size: int
             Batch size for replay buffer sampling
+        gm_seeding: bool
+            If seeding from GM, don't "go back"
         rng: np.random.RandomState
             rng for randomness. Should be fixed with a seed
         device: torch.device,
@@ -490,10 +497,11 @@ class SAC(RLAlgorithm):
             input_size,
             action_size,
             hidden_size,
-            action_std,
+            0.,
             lr,
             gamma,
             batch_size,
+            gm_seeding,
             rng,
             device,
         )
@@ -506,6 +514,9 @@ class SAC(RLAlgorithm):
         # Initialize target policy to provide baseline
         self.target = copy.deepcopy(self.policy)
 
+        # Initialize teacher policy for imitation learning
+        self.teacher = copy.deepcopy(self.policy)
+
         # SAC requires a different model for actors and critics
         # Optimizer for actor
         self.actor_optimizer = torch.optim.Adam(
@@ -515,6 +526,9 @@ class SAC(RLAlgorithm):
         self.critic_optimizer = torch.optim.Adam(
             self.policy.critic.parameters(), lr=lr)
 
+        # Temperature
+        self.alpha = alpha
+
         # SAC-specific parameters
         self.max_action = 1.
         self.on_policy = False
@@ -523,8 +537,6 @@ class SAC(RLAlgorithm):
         self.total_it = 0
         self.policy_freq = 2
         self.tau = 0.005
-        self.noise_clip = 0.5
-        self.alpha = alpha
 
         # Replay buffer
         self.replay_buffer = ReplayBuffer(
@@ -609,17 +621,12 @@ class SAC(RLAlgorithm):
             # "Harvesting" here means removing "done" trajectories
             # from state as well as removing the associated streamlines
             # This line also set the next_state as the state
-            new_tractogram, state, _ = env.harvest(next_state)
-
-            # Add streamlines to the lot
-            if len(new_tractogram.streamlines) > 0:
-                if tractogram is None:
-                    tractogram = new_tractogram
-                else:
-                    tractogram += new_tractogram
+            state, _ = env.harvest(next_state)
 
             # Keeping track of episode length
             episode_length += 1
+
+        tractogram = env.get_streamlines()
 
         return (
             tractogram,
@@ -663,6 +670,15 @@ class SAC(RLAlgorithm):
         state, action, next_state, reward, not_done = \
             replay_buffer.sample(batch_size)
 
+        pi, logp_pi = self.policy.act(state)
+        alpha = self.alpha
+
+        q1, q2 = self.policy.critic(state, pi)
+        q_pi = torch.min(q1, q2)
+
+        # Entropy-regularized policy loss
+        actor_loss = (alpha * logp_pi - q_pi).mean()
+
         with torch.no_grad():
             # Target actions come from *current* policy
             next_action, logp_next_action = self.policy.act(next_state)
@@ -673,7 +689,7 @@ class SAC(RLAlgorithm):
             target_Q = torch.min(target_Q1, target_Q2)
 
             backup = reward + self.gamma * not_done * \
-                (target_Q - self.alpha * logp_next_action)
+                (target_Q - alpha * logp_next_action)
 
         # Get current Q estimates
         current_Q1, current_Q2 = self.policy.critic(
@@ -684,22 +700,15 @@ class SAC(RLAlgorithm):
         loss_q2 = ((current_Q2 - backup)**2).mean()
         critic_loss = loss_q1 + loss_q2
 
-        # Optimize the critic
-        self.critic_optimizer.zero_grad()
-        critic_loss.backward()
-        self.critic_optimizer.step()
-
-        pi, logp_pi = self.policy.act(state)
-        q1, q2 = self.policy.critic(state, pi)
-        q_pi = torch.min(q1, q2)
-
-        # Entropy-regularized policy loss
-        actor_loss = (self.alpha * logp_pi - q_pi).mean()
-
         # Optimize the actor
         self.actor_optimizer.zero_grad()
         actor_loss.backward()
         self.actor_optimizer.step()
+
+        # Optimize the critic
+        self.critic_optimizer.zero_grad()
+        critic_loss.backward()
+        self.critic_optimizer.step()
 
         # Update the frozen target models
         for param, target_param in zip(

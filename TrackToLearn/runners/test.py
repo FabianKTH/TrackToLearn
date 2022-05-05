@@ -8,10 +8,14 @@ import torch
 
 from argparse import RawTextHelpFormatter
 from dipy.tracking.metrics import length as slength, winding
-from nibabel.streamlines import Tractogram
+from dipy.io.stateful_tractogram import Space, StatefulTractogram
 
+from TrackToLearn.algorithms.a2c import A2C
+from TrackToLearn.algorithms.acer import ACER
+from TrackToLearn.algorithms.acktr import ACKTR
 from TrackToLearn.algorithms.ddpg import DDPG
 from TrackToLearn.algorithms.ppo import PPO
+from TrackToLearn.algorithms.trpo import TRPO
 from TrackToLearn.algorithms.td3 import TD3
 from TrackToLearn.algorithms.sac import SAC
 from TrackToLearn.algorithms.sac_auto import SACAuto
@@ -20,16 +24,16 @@ from TrackToLearn.datasets.utils import MRIDataVolume
 from TrackToLearn.runners.experiment import (
     add_environment_args,
     add_experiment_args,
-    add_tracking_args,
-    TrackToLearnExperiment)
+    add_tracking_args)
+from TrackToLearn.runners.ttl import TrackToLearnExperiment
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 assert(torch.cuda.is_available())
 
 
 class TrackToLearnTest(TrackToLearnExperiment):
-    """ TrackToLearn testing script. Should work on any model trained with a TrackToLearn
-    experiment, RL or not
+    """ TrackToLearn testing script. Should work on any model trained with a
+    TrackToLearn experiment
     """
 
     def __init__(
@@ -44,7 +48,6 @@ class TrackToLearnTest(TrackToLearnExperiment):
         ground_truth_folder: str,
         valid_noise: float,
         policy: str,
-        stochastic: bool,
         hyperparameters: str,
         tracking_batch_size: int,
         remove_invalid_streamlines: bool,
@@ -52,6 +55,7 @@ class TrackToLearnTest(TrackToLearnExperiment):
         n_seeds_per_voxel: int,
         min_length: float,
         max_length: float,
+        test_max_angle: float,
         gm_seeding: bool,
         fa_map_file: str = None,
     ):
@@ -74,7 +78,6 @@ class TrackToLearnTest(TrackToLearnExperiment):
         self.min_length = min_length
         self.max_length = max_length
         self.compute_reward = False
-        self.stochastic = stochastic
 
         self.fa_map = None
         if fa_map_file is not None:
@@ -89,7 +92,10 @@ class TrackToLearnTest(TrackToLearnExperiment):
             self.algorithm = hyperparams['algorithm']
             self.add_neighborhood = hyperparams['add_neighborhood']
             self.random_seed = np.random.randint(1000)
-            self.max_angle = hyperparams['max_angle']
+            if not test_max_angle:
+                self.max_angle = hyperparams['max_angle']
+            else:
+                self.max_angle = test_max_angle
             self.alignment_weighting = hyperparams['alignment_weighting']
             self.straightness_weighting = hyperparams['straightness_weighting']
             self.length_weighting = hyperparams['length_weighting']
@@ -100,6 +106,7 @@ class TrackToLearnTest(TrackToLearnExperiment):
             self.n_signal = hyperparams['n_signal']
             self.n_dirs = hyperparams['n_dirs']
             self.gm_seeding = hyperparams['gm_seeding']
+            self.no_retrack = hyperparams.get('no_retrack', False)
 
         self.comet_experiment = None
         self.remove_invalid_streamlines = remove_invalid_streamlines
@@ -125,9 +132,10 @@ class TrackToLearnTest(TrackToLearnExperiment):
             Filtered tractogram
         """
         print('Cleaning tractogram ... ', end='', flush=True)
+        tractogram = tractogram.to_world()
 
         streamlines = tractogram.streamlines
-
+        lengths = [slength(s) for s in streamlines]
         # # Filter by curvature
         # dirty_mask = is_flag_set(
         #     stopping_flags, StoppingFlags.STOPPING_CURVATURE)
@@ -136,34 +144,15 @@ class TrackToLearnTest(TrackToLearnExperiment):
         # Filter by length unless the streamline ends in GM
         # Example case: Bundle 3 of fibercup tends to be shorter than 35
 
-        lengths = [slength(s) for s in streamlines]
         short_lengths = np.asarray(
             [lgt <= self.min_length for lgt in lengths])
 
         dirty_mask = np.logical_or(short_lengths, dirty_mask)
 
         long_lengths = np.asarray(
-            [lgt > 200. for lgt in lengths])
+            [lgt > self.max_length for lgt in lengths])
 
         dirty_mask = np.logical_or(long_lengths, dirty_mask)
-
-        # start_mask = is_inside_mask(
-        #     np.asarray([s[0] for s in streamlines])[:, None],
-        #     self.target_mask.data, affine_vox2mask, 0.5)
-
-        # assert(np.any(start_mask))
-
-        # end_mask = is_inside_mask(
-        #     np.asarray([s[-1] for s in streamlines])[:, None],
-        #     self.target_mask.data, affine_vox2mask, 0.5)
-
-        # assert(np.any(end_mask))
-
-        # mask_mask = np.logical_not(np.logical_and(start_mask, end_mask))
-
-        # dirty_mask = np.logical_or(
-        #     dirty_mask,
-        #     mask_mask)
 
         # Filter by loops
         # For example: A streamline ending and starting in the same roi
@@ -180,9 +169,14 @@ class TrackToLearnTest(TrackToLearnExperiment):
 
         print('Kept {}/{} streamlines'.format(len(valid_indices[0]),
                                               len(streamlines)))
-
-        return Tractogram(clean_streamlines,
-                          data_per_streamline=clean_dps)
+        sft = StatefulTractogram(
+            clean_streamlines,
+            self.reference_file,
+            space=Space.RASMM,
+            data_per_streamline=clean_dps)
+        # Rest of the code presumes vox space
+        sft.to_vox()
+        return sft
 
     def run(self):
         """
@@ -198,12 +192,16 @@ class TrackToLearnTest(TrackToLearnExperiment):
         example_state = env.reset(0, 1)
         self.input_size = example_state.shape[1]
 
-        algs = {'PPO': PPO,
+        algs = {'VPG': VPG,
+                'A2C': A2C,
+                'ACER': ACER,
+                'ACKTR': ACKTR,
+                'PPO': PPO,
+                'TRPO': TRPO,
+                'DDPG': DDPG,
                 'TD3': TD3,
                 'SAC': SAC,
-                'SACAuto': SACAuto,
-                'DDPG': DDPG,
-                'VPG': VPG}
+                'SACAuto': SACAuto}
 
         rl_alg = algs[self.algorithm]
 
@@ -212,7 +210,6 @@ class TrackToLearnTest(TrackToLearnExperiment):
             self.input_size,
             3,
             self.hidden_size,
-            stochastic=self.stochastic,
             gm_seeding=self.gm_seeding,
             rng=self.rng,
             device=device)
@@ -248,6 +245,8 @@ def add_test_args(parser):
     parser.add_argument('--fa_map', type=str, default=None,
                         help='FA map to influence STD for probabilistic' +
                         'tracking')
+    parser.add_argument('--test_max_angle', type=float, default=None,
+                        help='Max test angle to override the model\'s own.')
 
 
 def parse_args():
@@ -284,7 +283,6 @@ if __name__ == '__main__':
         args.ground_truth_folder,
         args.valid_noise,
         args.policy,
-        args.stochastic,
         args.hyperparameters,
         args.tracking_batch_size,
         args.remove_invalid_streamlines,
@@ -292,6 +290,7 @@ if __name__ == '__main__':
         args.n_seeds_per_voxel,
         args.min_length,
         args.max_length,
+        args.test_max_angle,
         args.gm_seeding,
         args.fa_map,
     )

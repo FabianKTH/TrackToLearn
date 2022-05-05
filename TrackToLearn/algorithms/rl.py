@@ -24,6 +24,7 @@ class RLAlgorithm(object):
         lr: float = 3e-4,
         gamma: float = 0.99,
         batch_size: int = 10000,
+        gm_seeding: bool = False,
         rng: np.random.RandomState = None,
         device: torch.device = "cuda:0",
     ):
@@ -62,11 +63,13 @@ class RLAlgorithm(object):
         self.batch_size = batch_size
 
         self.rng = rng
+        self.gm_seeding = gm_seeding
 
     def _validation_episode(
         self,
         initial_state,
         env,
+        compress=False,
     ):
         """
         Main loop for the algorithm
@@ -97,7 +100,6 @@ class RLAlgorithm(object):
             # probabilistic
             action = self.policy.select_action(
                 np.array(state))
-
             # Perform action
             next_state, reward, done, _ = env.step(action)
 
@@ -107,14 +109,10 @@ class RLAlgorithm(object):
             # "Harvesting" here means removing "done" trajectories
             # from state as well as removing the associated streamlines
             # This line also set the next_state as the state
-            new_tractogram, state, _ = env.harvest(next_state, compress=True)
+            state, _ = env.harvest(
+                next_state)
 
-            # Add streamlines to the lot
-            if len(new_tractogram.streamlines) > 0:
-                if tractogram is None:
-                    tractogram = new_tractogram
-                else:
-                    tractogram += new_tractogram
+        tractogram = env.get_streamlines(compress=compress)
 
         return tractogram, running_reward
 
@@ -122,7 +120,8 @@ class RLAlgorithm(object):
         self,
         batch_size,
         env: BaseEnv,
-        backward_env: BaseEnv
+        backward_env: BaseEnv,
+        compress=False,
     ):
 
         # Track for every seed in the environment
@@ -135,16 +134,16 @@ class RLAlgorithm(object):
 
             # Track forward
             batch_tractogram, reward = self._validation_episode(
-                state, env)
+                state, env, compress=self.gm_seeding and compress)
 
-            # Flip streamlines to initialize backwards tracking
-            streamlines = [s[::-1] for s in batch_tractogram.streamlines]
-            state = backward_env.reset(streamlines)
-            del batch_tractogram
+            if not self.gm_seeding:
+                # Flip streamlines to initialize backwards tracking
+                # streamlines = [s[::-1] for s in batch_tractogram.streamlines]
+                state = backward_env.reset(batch_tractogram.streamlines)
 
-            # Track backwards
-            batch_tractogram, reward = self._validation_episode(
-                state, backward_env)
+                # Track backwards
+                batch_tractogram, reward = self._validation_episode(
+                    state, backward_env, compress=not self.gm_seeding and compress)
 
             yield batch_tractogram, reward
 
@@ -153,6 +152,7 @@ class RLAlgorithm(object):
         batch_size,
         env: BaseEnv,
         backward_env: BaseEnv,
+        compress: bool = False,
     ) -> Tuple[Tractogram, float]:
         """
         Call the main loop
@@ -179,14 +179,14 @@ class RLAlgorithm(object):
         # Reward gotten during validation
         cummulative_reward = 0
 
-        for t, r in self.generate_streamlines(batch_size, env, backward_env):
+        for t, r in self.generate_streamlines(batch_size, env, backward_env, compress):
             if tractogram is None:
                 tractogram = t
             else:
                 tractogram += t
             cummulative_reward += r
 
-        return tractogram, cummulative_reward
+        return tractogram,  cummulative_reward
 
     def run_train(
         self,
@@ -237,13 +237,13 @@ class RLAlgorithm(object):
         batch_tractogram, reward, actor_loss, critic_loss, length = \
             self._episode(state, env)
 
-        # Flip streamlines to initialize backwards tracking
-        streamlines = [s[::-1] for s in batch_tractogram.streamlines]
-        state = back_env.reset(streamlines)
+        if not self.gm_seeding:
+            # Flip streamlines to initialize backwards tracking
+            state = back_env.reset(batch_tractogram.streamlines)
 
-        # Track backwards
-        batch_tractogram, reward, actor_loss, critic_loss, length = \
-            self._episode(state, back_env)
+            # Track backwards
+            batch_tractogram, reward, actor_loss, critic_loss, length = \
+                self._episode(state, back_env)
 
         running_reward += reward
         running_actor_loss += actor_loss
@@ -256,3 +256,72 @@ class RLAlgorithm(object):
             running_critic_loss,
             running_reward,
             running_length)
+
+    def gym_train(
+        self,
+        env: BaseEnv,
+    ) -> Tuple[float, float, float]:
+        """
+        Call the main training loop
+
+        Parameters
+        ----------
+        env: BaseEnv
+            The environment actions are applied on. Provides the state fed to
+            the RL algorithm
+
+        Returns
+        -------
+        actor_loss: float
+            Cumulative policy training loss
+        critic_loss: float
+            Cumulative critic training loss
+        running_reward: float
+            Cummulative training steps reward
+        """
+
+        self.policy.train()
+
+        state = env.reset()
+
+        # Track forward
+        _, reward, actor_loss, critic_loss, length = \
+            self._episode(state, env)
+
+        return (
+            actor_loss,
+            critic_loss,
+            reward,
+            length)
+
+    def gym_validation(
+        self,
+        env: BaseEnv,
+    ) -> Tuple[Tractogram, float]:
+        """
+        Call the main loop
+
+        Parameters
+        ----------
+        env: BaseEnv
+            The environment actions are applied on. Provides the state fed to
+            the RL algorithm
+
+        Returns
+        -------
+        streamlines: Tractogram
+            Tractogram containing the tracked streamline
+        running_reward: float
+            Cummulative training steps reward
+        """
+        # Switch policy to eval mode so no gradients are computed
+        self.policy.eval()
+        env.render()
+        state = env.reset()
+
+        # Track forward
+        _, reward = self._validation_episode(
+            state, env)
+
+        env.render(close=True)
+        return reward

@@ -2,9 +2,9 @@
 import comet_ml  # noqa: F401 ugh
 import torch
 
-from TrackToLearn.runners.td3_train import (
+from TrackToLearn.runners.sac_auto_train import (
     parse_args,
-    TD3TrackToLearnTraining)
+    SACAutoTrackToLearnTraining)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 assert(torch.cuda.is_available())
@@ -19,20 +19,27 @@ def main():
     # We only need to specify the algorithm and hyperparameters to use:
     config = {
         # We pick the Bayes algorithm:
-        "algorithm": "bayes",
+        "algorithm": "grid",
 
         # Declare your hyperparameters in the Vizier-inspired format:
         "parameters": {
-            "action_std": {"type": "float", "min": 0.30, "max": 0.50},
-            "lr": {"type": "float", "min": 5e-7, "max": 1.0e-5},
-            "n_latent_var": {"type": "discrete",
-                                     "values": [1024]},
-            "gamma": {"type": "float", "min": 0.75, "max": 0.98},
+            "lr": {
+                "type": "discrete",
+                "values": [1e-5, 5e-5, 5e-4, 1e-4, 5e-3, 1e-3]},
+            "gamma": {
+                "type": "discrete",
+                "values": [0.75, 0.85, 0.90, 0.95, 0.99]},
+            "length_weighting": {
+                "type": "discrete",
+                "values": [0.01, 0.1, 0.25, 0.5, 1.]},
+            "alpha": {
+                "type": "discrete",
+                "values": [0.2]},
         },
 
         # Declare what we will be optimizing, and how:
         "spec": {
-            "metric": "VC",
+            "metric": "Reward",
             "objective": "maximize",
             "seed": args.rng_seed,
         },
@@ -47,12 +54,12 @@ def main():
         experiment.parse_args = False
         experiment.disabled = not args.use_comet
 
-        action_std = experiment.get_parameter("action_std")
-        n_latent_var = experiment.get_parameter("n_latent_var")
-        gamma = experiment.get_parameter("gamma")
         lr = experiment.get_parameter("lr")
+        gamma = experiment.get_parameter("gamma")
+        alpha = experiment.get_parameter("alpha")
+        length_weighting = experiment.get_parameter("length_weighting")
 
-        td3_experiment = TD3TrackToLearnTraining(
+        sac_experiment = SACAutoTrackToLearnTraining(
             # Dataset params
             args.path,
             args.experiment,
@@ -66,11 +73,11 @@ def main():
             # RL params
             args.max_ep,
             args.log_interval,
-            action_std,
             args.valid_noise,
             lr,
             gamma,
-            # TD3 params
+            alpha,
+            # SAC
             args.training_batch_size,
             # Env params
             args.n_seeds_per_voxel,
@@ -78,10 +85,19 @@ def main():
             args.min_length,
             args.max_length,
             args.step_size,  # Step size (in mm)
+            args.alignment_weighting,
+            args.straightness_weighting,
+            length_weighting,
+            args.target_bonus_factor,
+            args.exclude_penalty_factor,
+            args.angle_penalty_factor,
+            args.tracking_batch_size,
             args.n_signal,
             args.n_dirs,
+            args.gm_seeding,
+            args.no_retrack,
             # Model params
-            n_latent_var,
+            args.n_latent_var,
             args.hidden_layers,
             args.add_neighborhood,
             # Experiment params
@@ -93,7 +109,7 @@ def main():
             args.load_teacher,
             args.load_policy,
         )
-        td3_experiment.run()
+        sac_experiment.run()
 
 
 if __name__ == '__main__':
