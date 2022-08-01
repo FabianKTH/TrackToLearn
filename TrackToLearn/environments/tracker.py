@@ -19,8 +19,8 @@ class Tracker(BaseEnv):
     """
 
     def _is_stopping(
-        self,
-        streamlines: np.ndarray
+            self,
+            streamlines: np.ndarray
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """ Check which streamlines should stop or not according to the
         predefined stopping criteria
@@ -46,9 +46,9 @@ class Tracker(BaseEnv):
         return continue_idx, stopping_idx, stopping_flags
 
     def _keep(
-        self,
-        idx: np.ndarray,
-        state: np.ndarray,
+            self,
+            idx: np.ndarray,
+            state: np.ndarray,
     ) -> np.ndarray:
         """ Keep only streamlines corresponding to the given indices, and remove
         all others. The model states will be updated accordingly.
@@ -138,8 +138,8 @@ class Tracker(BaseEnv):
         return self._format_state(self.streamlines[:, :self.length])
 
     def step(
-        self,
-        directions: np.ndarray,
+            self,
+            directions: np.ndarray,
     ) -> Tuple[np.ndarray, list, bool, dict]:
         """
         Apply actions and grow streamlines for one step forward
@@ -170,7 +170,7 @@ class Tracker(BaseEnv):
 
         # Grow streamlines one step forward
         self.streamlines[:, self.length, :] = \
-            self.streamlines[:, self.length-1, :] + directions
+            self.streamlines[:, self.length - 1, :] + directions
         self.length += 1
 
         reward = np.zeros(self.streamlines.shape[0])
@@ -198,9 +198,9 @@ class Tracker(BaseEnv):
             reward, self.dones, {})
 
     def harvest(
-        self,
-        states: np.ndarray,
-        compress=False,
+            self,
+            states: np.ndarray,
+            compress=False,
     ) -> Tuple[StatefulTractogram, np.ndarray]:
         """Internally keep only the streamlines and corresponding env. states
         that haven't stopped yet, and return the streamlines that triggered a
@@ -230,7 +230,7 @@ class Tracker(BaseEnv):
         # Harvest stopped streamlines and associated data
         stopped_seeds = self.starting_points[self.stopping_idx]
         stopped_streamlines = self.streamlines[
-            self.stopping_idx, :self.length]
+                              self.stopping_idx, :self.length]
 
         # Drop last point if it triggered a flag we don't want
         flags = is_flag_set(
@@ -266,8 +266,8 @@ class BackwardTracker(Tracker):
     """
 
     def _is_stopping(
-        self,
-        streamlines: np.ndarray
+            self,
+            streamlines: np.ndarray
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """ Check which streamlines should stop or not according to the
         predefined stopping criteria
@@ -309,9 +309,9 @@ class BackwardTracker(Tracker):
         return continue_idx, stopping_idx, stopping_flags
 
     def _keep(
-        self,
-        idx: np.ndarray,
-        states: np.ndarray,
+            self,
+            idx: np.ndarray,
+            states: np.ndarray,
     ) -> Tuple[np.ndarray, np.ndarray]:
         """ Keep only streamlines corresponding to the given indices, and remove
         all others. The model states will be updated accordingly.
@@ -368,8 +368,8 @@ class BackwardTracker(Tracker):
         return self._format_state(self.streamlines[:, :self.length])
 
     def step(
-        self,
-        directions: np.ndarray,
+            self,
+            directions: np.ndarray,
     ) -> Tuple[np.ndarray, list, bool, dict]:
         """
         Apply actions and grow streamlines for one step forward
@@ -401,7 +401,7 @@ class BackwardTracker(Tracker):
 
         # Grow streamlines one step forward
         self.streamlines[:, self.length, :] = \
-            self.streamlines[:, self.length-1, :] + directions
+            self.streamlines[:, self.length - 1, :] + directions
         self.length += 1
 
         reward = np.zeros(self.streamlines.shape[0])
@@ -425,8 +425,8 @@ class BackwardTracker(Tracker):
                 np.arange(len(self.n_init_steps))[is_still_initializing]
 
             for i in is_still_initializing_idx:
-                self.streamlines[i][self.length-1] = \
-                    self.seeding_streamlines[i][self.length-1]
+                self.streamlines[i][self.length - 1] = \
+                    self.seeding_streamlines[i][self.length - 1]
 
         # Get indices for streamlines that are done
         self.continue_idx, self.stopping_idx, self.stopping_flags = \

@@ -16,16 +16,16 @@ class RLAlgorithm(object):
     """
 
     def __init__(
-        self,
-        input_size: int,
-        action_size: int = 3,
-        hidden_size: int = 256,
-        action_std: float = 0.35,
-        lr: float = 3e-4,
-        gamma: float = 0.99,
-        batch_size: int = 10000,
-        rng: np.random.RandomState = None,
-        device: torch.device = "cuda:0",
+            self,
+            input_size: int,
+            action_size: int = 3,
+            hidden_size: int = 256,
+            action_std: float = 0.35,
+            lr: float = 3e-4,
+            gamma: float = 0.99,
+            batch_size: int = 10000,
+            rng: np.random.RandomState = None,
+            device: torch.device = "cuda:0",
     ):
         """
         Parameters
@@ -64,9 +64,9 @@ class RLAlgorithm(object):
         self.rng = rng
 
     def _validation_episode(
-        self,
-        initial_state,
-        env,
+            self,
+            initial_state,
+            env,
     ):
         """
         Main loop for the algorithm
@@ -119,15 +119,14 @@ class RLAlgorithm(object):
         return tractogram, running_reward
 
     def generate_streamlines(
-        self,
-        batch_size,
-        env: BaseEnv,
-        backward_env: BaseEnv
+            self,
+            batch_size,
+            env: BaseEnv,
+            backward_env: BaseEnv
     ):
 
         # Track for every seed in the environment
         for i, start in enumerate(tqdm(range(0, len(env.seeds), batch_size))):
-
             # Last batch might not be "full"
             end = min(start + batch_size, len(env.seeds))
 
@@ -149,10 +148,10 @@ class RLAlgorithm(object):
             yield batch_tractogram, reward
 
     def run_validation(
-        self,
-        batch_size,
-        env: BaseEnv,
-        backward_env: BaseEnv,
+            self,
+            batch_size,
+            env: BaseEnv,
+            backward_env: BaseEnv,
     ) -> Tuple[Tractogram, float]:
         """
         Call the main loop
@@ -189,10 +188,10 @@ class RLAlgorithm(object):
         return tractogram, cummulative_reward
 
     def run_train(
-        self,
-        env: BaseEnv,
-        back_env: BaseEnv,
-        batch_size: int = 2**12,  # TODO: Parametrize this
+            self,
+            env: BaseEnv,
+            back_env: BaseEnv,
+            batch_size: int = 2 ** 12,  # TODO: Parametrize this
     ) -> Tuple[Tractogram, float, float, float]:
         """
         Call the main training loop forward then backward

@@ -5,7 +5,6 @@ from enum import Enum
 
 from scipy.ndimage.interpolation import map_coordinates
 
-
 B1 = np.array([[1, 0, 0, 0, 0, 0, 0, 0],
                [-1, 0, 0, 0, 1, 0, 0, 0],
                [-1, 0, 1, 0, 0, 0, 0, 0],
@@ -38,12 +37,12 @@ class StoppingFlags(Enum):
 
 
 def get_sh(
-    segments,
-    data_volume,
-    add_neighborhood_vox,
-    neighborhood_directions,
-    history,
-    device
+        segments,
+        data_volume,
+        add_neighborhood_vox,
+        neighborhood_directions,
+        history,
+        device
 ) -> np.ndarray:
     """ Get the sh coefficients at the end of streamlines
     """
@@ -70,7 +69,7 @@ def get_sh(
 
         # Reshape signal into (n_coords, new_feature_size)
         new_feature_size = partial_signal.size()[-1] * \
-            neighborhood_directions.size()[0]
+                           neighborhood_directions.size()[0]
     else:
         partial_signal = torch_trilinear_interpolation(
             data_volume,
@@ -85,8 +84,8 @@ def get_sh(
 
 
 def torch_trilinear_interpolation(
-    volume: torch.Tensor,
-    coords: torch.Tensor,
+        volume: torch.Tensor,
+        coords: torch.Tensor,
 ) -> torch.Tensor:
     """Evaluates the data volume at given coordinates using trilinear
     interpolation on a torch tensor.
@@ -112,8 +111,8 @@ def torch_trilinear_interpolation(
     # Get device, and make sure volume and coords are using the same one
     assert volume.device == coords.device, "volume on device: {}; " \
                                            "coords on device: {}".format(
-                                               volume.device,
-                                               coords.device)
+        volume.device,
+        coords.device)
     coords = coords.type(torch.float32)
     volume = volume.type(torch.float32)
 
@@ -130,7 +129,7 @@ def torch_trilinear_interpolation(
     if volume.dim() == 3:
         # torch needs indices to be cast to long
         indices_unclipped = (
-            coords[:, None, :] + idx_torch).reshape((-1, 3)).long()
+                coords[:, None, :] + idx_torch).reshape((-1, 3)).long()
 
         # Clip indices to make sure we don't go out-of-bounds
         lower = torch.as_tensor([0, 0, 0]).to(device)
@@ -146,7 +145,7 @@ def torch_trilinear_interpolation(
         dx, dy, dz = d[:, 0], d[:, 1], d[:, 2]
         Q1 = torch.stack([
             torch.ones_like(dx), dx, dy, dz, dx * dy, dy * dz,
-            dx * dz, dx * dy * dz],
+                                             dx * dz, dx * dy * dz],
             dim=0)
         output = torch.sum(P * torch.mm(B1_torch.t(), Q1), dim=0)
 
@@ -170,7 +169,7 @@ def torch_trilinear_interpolation(
         dx, dy, dz = d[:, 0], d[:, 1], d[:, 2]
         Q1 = torch.stack([
             torch.ones_like(dx), dx, dy, dz, dx * dy,
-            dy * dz, dx * dz, dx * dy * dz],
+                                             dy * dz, dx * dz, dx * dy * dz],
             dim=0)
         output = torch.sum(
             P * torch.mm(B1_torch.t(), Q1).t()[:, :, None], dim=1)
@@ -182,10 +181,10 @@ def torch_trilinear_interpolation(
 
 
 def interpolate_volume_at_coordinates(
-    volume: np.ndarray,
-    coords: np.ndarray,
-    mode: str = 'nearest',
-    order: int = 1
+        volume: np.ndarray,
+        coords: np.ndarray,
+        mode: str = 'nearest',
+        order: int = 1
 ) -> np.ndarray:
     """ Evaluates a 3D or 4D volume data at the given coordinates using trilinear
     interpolation.
@@ -224,7 +223,7 @@ def interpolate_volume_at_coordinates(
 
 
 def get_neighborhood_directions(
-    radius: float
+        radius: float
 ) -> np.ndarray:
     """ Returns predefined neighborhood directions at exactly `radius` length
         For now: Use the 6 main axes as neighbors directions, plus (0,0,0)
@@ -249,10 +248,10 @@ def get_neighborhood_directions(
 
 
 def is_inside_mask(
-    streamlines: np.ndarray,
-    mask: np.ndarray,
-    affine_vox2mask: np.ndarray = None,
-    threshold: float = 0.
+        streamlines: np.ndarray,
+        mask: np.ndarray,
+        affine_vox2mask: np.ndarray = None,
+        threshold: float = 0.
 ):
     """ Checks which streamlines have their last coordinates inside a mask.
 
@@ -288,10 +287,10 @@ def is_inside_mask(
 
 
 def is_outside_mask(
-    streamlines: np.ndarray,
-    mask: np.ndarray,
-    affine_vox2mask: np.ndarray = None,
-    threshold: float = 0.
+        streamlines: np.ndarray,
+        mask: np.ndarray,
+        affine_vox2mask: np.ndarray = None,
+        threshold: float = 0.
 ):
     """ Checks which streamlines have their last coordinates outside a mask.
 

@@ -582,6 +582,9 @@ class SAC(RLAlgorithm):
 
             self.t += action.shape[0]
             # Perform action
+
+            # import ipdb; ipdb.set_trace()
+
             next_state, reward, done, _ = env.step(action)
             done_bool = done
 

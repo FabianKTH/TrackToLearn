@@ -19,6 +19,8 @@ from TrackToLearn.runners.experiment import (
 from TrackToLearn.runners.train import (
     add_rl_args,
     TrackToLearnTraining)
+from TrackToLearn.fabi_utils.communication import IbafServer
+
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 assert(torch.cuda.is_available())
@@ -328,4 +330,7 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    # next line is for communication with client
+    # TODO: read ip, port etc from params
+    with IbafServer(reciever_host="0.0.0.0") as ibaf:
+        main()

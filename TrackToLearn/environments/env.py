@@ -23,6 +23,8 @@ from TrackToLearn.environments.utils import (
     is_too_long,
     StoppingFlags)
 
+from TrackToLearn.fabi_utils.communication import IbafServer
+import time
 
 class BaseEnv(object):
     """
@@ -31,20 +33,20 @@ class BaseEnv(object):
     """
 
     def __init__(
-        self,
-        dataset_file: str,
-        subject_id: str,
-        n_signal: int = 1,
-        n_dirs: int = 4,
-        step_size: float = 0.2,
-        max_angle: float = 45,
-        min_length: float = 10,
-        max_length: float = 200,
-        n_seeds_per_voxel: int = 4,
-        rng: np.random.RandomState = None,
-        add_neighborhood: float = 1.5,
-        compute_reward: bool = True,
-        device=None
+            self,
+            dataset_file: str,
+            subject_id: str,
+            n_signal: int = 1,
+            n_dirs: int = 4,
+            step_size: float = 0.2,
+            max_angle: float = 45,
+            min_length: float = 10,
+            max_length: float = 200,
+            n_seeds_per_voxel: int = 4,
+            rng: np.random.RandomState = None,
+            add_neighborhood: float = 1.5,
+            compute_reward: bool = True,
+            device=None
     ):
         """
         Parameters
@@ -194,9 +196,9 @@ class BaseEnv(object):
             assert subject_id in list(
                 hdf_file.keys()), (("Subject {} not found in file: {}\n" +
                                     "Subjects are {}").format(
-                    subject_id,
-                    dataset_file,
-                    list(hdf_file.keys())))
+                subject_id,
+                dataset_file,
+                list(hdf_file.keys())))
             tracto_data = TractographyData.from_hdf_subject(
                 hdf_file[subject_id])
             tracto_data.input_dv.subject_id = subject_id
@@ -219,11 +221,11 @@ class BaseEnv(object):
                 target_mask, seeding, peaks)
 
     def _get_tracking_seeds_from_mask(
-        self,
-        mask: np.ndarray,
-        affine_seedsvox2dwivox: np.ndarray,
-        n_seeds_per_voxel: int,
-        rng: np.random.RandomState
+            self,
+            mask: np.ndarray,
+            affine_seedsvox2dwivox: np.ndarray,
+            n_seeds_per_voxel: int,
+            rng: np.random.RandomState
     ) -> np.ndarray:
         """ Given a binary seeding mask, get seeds in DWI voxel
         space using the provided affine
@@ -255,8 +257,8 @@ class BaseEnv(object):
         return seeds
 
     def _format_state(
-        self,
-        streamlines: np.ndarray
+            self,
+            streamlines: np.ndarray
     ) -> np.ndarray:
         """
         From the last streamlines coordinates, extract the corresponding
@@ -285,11 +287,16 @@ class BaseEnv(object):
             self.device
         )
 
+        # import ipdb; ipdb.set_trace()
+        if L >= 2:
+            IbafServer.provide_msg(streamlines)
+            time.sleep(.1)
+
         previous_dirs = np.zeros((N, self.n_dirs, P), dtype=np.float32)
         if L > 1:
             dirs = streamlines[:, 1:, :] - streamlines[:, :-1, :]
             previous_dirs[:, :min(dirs.shape[1], self.n_dirs), :] = \
-                dirs[:, :-(self.n_dirs+1):-1, :]
+                dirs[:, :-(self.n_dirs + 1):-1, :]
 
         dir_inputs = torch.reshape(torch.as_tensor(previous_dirs,
                                                    device=self.device),
@@ -298,9 +305,9 @@ class BaseEnv(object):
         return inputs.cpu().numpy()
 
     def _filter_stopping_streamlines(
-        self,
-        streamlines: np.ndarray,
-        stopping_criteria: Dict[StoppingFlags, Callable]
+            self,
+            streamlines: np.ndarray,
+            stopping_criteria: Dict[StoppingFlags, Callable]
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """ Checks which streamlines should stop and which ones should continue.
 
@@ -338,7 +345,7 @@ class BaseEnv(object):
 
         return idx[should_continue], idx[should_stop], flags[should_stop]
 
-    def _is_stopping():
+    def _is_stopping(self):
         """ Check which streamlines should stop or not according to the
         predefined stopping criteria
         """
@@ -361,18 +368,18 @@ class BaseEnv(object):
             self.streamlines[:, :self.length])
         return stopping_idx[(stopping_flags & flag) != 0]
 
-    def _keep():
+    def _keep(self):
         """ Keep only streamlines corresponding to the given indices, and remove
         all others. The model states will be updated accordingly.
         """
         pass
 
-    def reset():
+    def reset(self):
         """ Initialize tracking seeds and streamlines
         """
         pass
 
-    def step():
+    def step(self):
         """
         Apply actions and grow streamlines for one step forward
         Calculate rewards and if the tracking is done, and compute new
@@ -381,9 +388,9 @@ class BaseEnv(object):
         pass
 
     def render(
-        self,
-        tractogram: Tractogram = None,
-        filename: str = None
+            self,
+            tractogram: Tractogram = None,
+            filename: str = None
     ):
         """ Render the streamlines, either directly or through a file
         Might render from "outside" the environment, like for comet
@@ -407,7 +414,7 @@ class BaseEnv(object):
 
         # Reshape peaks for displaying
         X, Y, Z, M = self.peaks.data.shape
-        peaks = np.reshape(self.peaks.data, (X, Y, Z, 5, M//5))
+        peaks = np.reshape(self.peaks.data, (X, Y, Z, 5, M // 5))
 
         # Setup scene and actors
         scene = window.Scene()
