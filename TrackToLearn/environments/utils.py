@@ -43,7 +43,7 @@ def get_sh(
         neighborhood_directions,
         history,
         device
-) -> np.ndarray:
+) -> torch.Tensor:
     """ Get the sh coefficients at the end of streamlines
     """
 
@@ -55,10 +55,8 @@ def get_sh(
 
     if add_neighborhood_vox:
         # Extend the coords array with the neighborhood coordinates
-        coords = torch.repeat_interleave(
-            coords,
-            neighborhood_directions.size()[0],
-            axis=0)
+        coords = torch.repeat_interleave(coords,
+                                         neighborhood_directions.size()[0], dim=0)  # before: axis instead dim
 
         coords[:, :3] += \
             neighborhood_directions.repeat(n_coords, 1)

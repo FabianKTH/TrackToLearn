@@ -189,8 +189,7 @@ class Actor(nn.Module):
         self,
         state: torch.Tensor,
         stochastic: bool,
-        with_logprob: bool = False,
-    ) -> torch.Tensor:
+    ) -> (torch.Tensor, torch.Tensor):
         """ Forward propagation of the actor.
         Outputs an un-noisy un-normalized action
         """
@@ -264,7 +263,7 @@ class Critic(nn.Module):
         self.l5 = nn.Linear(hidden_dim, hidden_dim)
         self.l6 = nn.Linear(hidden_dim, 1)
 
-    def forward(self, state, action) -> torch.Tensor:
+    def forward(self, state, action) -> (torch.Tensor, torch.Tensor):
         """ Forward propagation of the actor.
         Outputs a q estimate from both critics
         """
@@ -333,7 +332,7 @@ class ActorCritic(object):
         self,
         state: torch.Tensor,
         stochastic: bool = True,
-    ) -> torch.Tensor:
+    ) -> (torch.Tensor, torch.Tensor):
         """ Select action according to actor
 
         Parameters:
