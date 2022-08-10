@@ -3,6 +3,9 @@ from enum import Enum
 import numpy as np
 import torch
 from scipy.ndimage.interpolation import map_coordinates
+from torch import Tensor
+from torch.distributions.normal import Normal
+
 
 B1 = np.array([[1, 0, 0, 0, 0, 0, 0, 0],
                [-1, 0, 0, 0, 1, 0, 0, 0],
@@ -56,7 +59,7 @@ def angle_between_two_vec(v1, v2):
 
 def get_neighbour_indices(center, data_shape, neighb_size):
     limit_low = np.array([0, 0, 0])
-    limit_high = np.array(data_shape[:-1]) - 1
+    limit_high = np.array(data_shape) - 1  # TODO: no ":-1"
     c = center
     nb = neighb_size
 
@@ -91,6 +94,58 @@ def get_input_channels(indices, center, data, data_shape, no_channels, neighb_si
         channels.append(weighted_sph_coeff.sum(axis=0))
 
     return channels
+
+
+def get_sph_channels(
+        segments,
+        data_volume,
+        no_channels=3,
+        neighb_cube_dim=5,
+        device=torch.cuda):
+    N, H, P = segments.shape
+    t_ = torch.arange(0, neighb_cube_dim)
+    ring_radii = torch.arange(0, neighb_cube_dim, neighb_cube_dim / no_channels)
+
+    neighb_indices = torch.moveaxis(torch.stack(torch.meshgrid(t_, t_, t_)), 0, -1).view(-1, 3)  # TODO: no moveais/movedim in this torch version
+
+    flat_centers = np.concatenate(segments, axis=0)
+    centers = torch.as_tensor(flat_centers).to(device)
+
+    no_centers = centers.shape[0]
+
+    centers = torch.repeat_interleave(centers, neighb_indices.size()[0], dim=0)
+    coords = torch.empty_like(centers)
+    coords[:, :3] += neighb_indices.repeat(no_centers, 1)
+    distances = torch.norm(centers - coords.type(torch.DoubleTensor))
+
+    no_sph_coeff = data_volume.shape[-1]
+    ring_radii = torch.repeat_interleave(ring_radii, coords.size()[0])
+
+    dist = Normal(ring_radii, 1.)
+    weights = dist.logprob(distances.repeat(ring_radii.size()[0]))  # TODO: no_channels instead ring_radii.size()[0] ?
+
+    # TODO: get data at coords
+    lower = torch.as_tensor([0, 0, 0]).to(device)
+    upper = (torch.as_tensor(data_volume.shape[:-1]) - 1).to(device)
+    coords_clipped = torch.min(torch.max(coords, lower), upper)
+
+    # trick: set the weights of all clipped points to zero (to prevent double counting)
+    weights = torch.where(coords_clipped != coords, 0., weights)
+    data = data_volume[:coords_clipped[0], :coords_clipped[1], :coords_clipped[2]]
+
+    # scale according to weights
+    scaled = data * weights
+
+    # split into individual channels
+    scaled = torch.stack(torch.split(scaled, no_channels))  # check if no_channels
+
+    # split into individual batches
+    scaled = torch.stack(torch.split(scaled, H))  # check if no_channels
+
+    coeff_channels = torch.sum(scaled, dim=2)
+
+
+
 
 
 # Flags enum

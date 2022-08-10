@@ -21,7 +21,8 @@ from TrackToLearn.environments.utils import (
     is_too_curvy,
     is_outside_mask,
     is_too_long,
-    StoppingFlags)
+    StoppingFlags,
+    get_sph_channels)
 
 from TrackToLearn.fabi_utils.communication import IbafServer
 import time
@@ -277,6 +278,9 @@ class BaseEnv(object):
         N, L, P = streamlines.shape
 
         segments = streamlines[:, :-(self.n_signal + 1):-1, :]
+
+        # fabi call
+        get_sph_channels(segments, self.data_volume)
 
         signal = get_sh(
             segments,
