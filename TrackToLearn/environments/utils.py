@@ -1,8 +1,7 @@
-import numpy as np
-import torch
-
 from enum import Enum
 
+import numpy as np
+import torch
 from scipy.ndimage.interpolation import map_coordinates
 
 B1 = np.array([[1, 0, 0, 0, 0, 0, 0, 0],
@@ -24,6 +23,75 @@ idx = np.array([[0, 0, 0],
                 [1, 1, 1]], dtype=np.float)
 
 
+# cpy paste from https://github.com/numpy/numpy/issues/5228
+def cart2sph(x, y, z):
+    hxy = np.hypot(x, y)
+    r = np.hypot(hxy, z)
+    el = np.arctan2(z, hxy)
+    az = np.arctan2(y, x)
+    return az, el, r
+
+
+def sph2cart(az, el, r):
+    rcos_theta = r * np.cos(el)
+    x = rcos_theta * np.cos(az)
+    y = rcos_theta * np.sin(az)
+    z = r * np.sin(el)
+    return x, y, z
+
+
+def angle_between_two_vec(v1, v2):
+    """ Returns the angle in radians between vectors 'v1' and 'v2'::
+    (from https://stackoverflow.com/a/13849249)
+    """
+
+    def unit_vector(vector):
+        """ Returns the unit vector of the vector.  """
+        return vector / np.linalg.norm(vector)
+
+    v1_u = unit_vector(v1)
+    v2_u = unit_vector(v2)
+    return np.arccos(np.clip(np.dot(v1_u, v2_u), -1.0, 1.0))
+
+
+def get_neighbour_indices(center, data_shape, neighb_size):
+    limit_low = np.array([0, 0, 0])
+    limit_high = np.array(data_shape[:-1]) - 1
+    c = center
+    nb = neighb_size
+
+    indices_unclipped = np.mgrid[c[0] - nb: c[0] + nb + 1,
+                                 c[1] - nb: c[1] + nb + 1,
+                                 c[2] - nb: c[2] + nb + 1].transpose(
+        1, 2, 3, 0).reshape(-1, 3, order='f')
+
+    # import ipdb; ipdb.set_trace()
+    indices = indices_unclipped[np.invert(np.any(indices_unclipped < limit_low, axis=1))]
+    indices = indices[np.invert(np.any(indices > limit_high, axis=1))]
+    # indices = np.min(np.max(indices_unclipped, limit_low), limit_high)
+    # return list(indices)
+    return indices
+
+
+def get_input_channels(indices, center, data, data_shape, no_channels, neighb_size, scale_pdf=1.):
+    distances = np.linalg.norm(indices - center, axis=1)
+    ring_radii = np.arange(0, neighb_size, neighb_size / no_channels)
+    indices_flat = np.ravel_multi_index(
+        indices.astype(int).T,
+        data_shape[:-1],
+        order='f')
+    no_sph_coeff = data_shape[-1]
+
+    channels = list()
+
+    for radius in ring_radii:
+        weights = np.linalg.norm.pdf(distances, loc=radius, scale=scale_pdf)
+        weighted_sph_coeff = np.repeat(weights[:, np.newaxis], no_sph_coeff,
+                                       axis=1) * data[indices_flat]
+        channels.append(weighted_sph_coeff.sum(axis=0))
+
+    return channels
+
 
 # Flags enum
 class StoppingFlags(Enum):
@@ -44,7 +112,7 @@ def get_sh(
         neighborhood_directions,
         history,
         device
-) -> torch.Tensor:
+        ) -> torch.Tensor:
     """ Get the sh coefficients at the end of streamlines
     """
 
@@ -67,8 +135,7 @@ def get_sh(
             data_volume, coords)
 
         # Reshape signal into (n_coords, new_feature_size)
-        new_feature_size = partial_signal.size()[-1] * \
-                           neighborhood_directions.size()[0]
+        new_feature_size = partial_signal.size()[-1] * neighborhood_directions.size()[0]
     else:
         partial_signal = torch_trilinear_interpolation(
             data_volume,
@@ -85,7 +152,7 @@ def get_sh(
 def torch_trilinear_interpolation(
         volume: torch.Tensor,
         coords: torch.Tensor,
-) -> torch.Tensor:
+        ) -> torch.Tensor:
     """Evaluates the data volume at given coordinates using trilinear
     interpolation on a torch tensor.
 
@@ -109,9 +176,7 @@ def torch_trilinear_interpolation(
     """
     # Get device, and make sure volume and coords are using the same one
     assert volume.device == coords.device, "volume on device: {}; " \
-                                           "coords on device: {}".format(
-        volume.device,
-        coords.device)
+                                           "coords on device: {}".format(volume.device, coords.device)
     coords = coords.type(torch.float32)
     volume = volume.type(torch.float32)
 
@@ -138,14 +203,12 @@ def torch_trilinear_interpolation(
         # Fetch volume data at indices
         P = volume[
             indices[:, 0], indices[:, 1], indices[:, 2]
-        ].reshape((coords.shape[0], -1)).t()
+            ].reshape((coords.shape[0], -1)).t()
 
         d = coords - torch.floor(coords)
         dx, dy, dz = d[:, 0], d[:, 1], d[:, 2]
         Q1 = torch.stack([
-            torch.ones_like(dx), dx, dy, dz, dx * dy, dy * dz,
-                                             dx * dz, dx * dy * dz],
-            dim=0)
+            torch.ones_like(dx), dx, dy, dz, dx * dy, dy * dz, dx * dz, dx * dy * dz], dim=0)
         output = torch.sum(P * torch.mm(B1_torch.t(), Q1), dim=0)
 
         return output
@@ -167,9 +230,7 @@ def torch_trilinear_interpolation(
         d = coords - torch.floor(coords)
         dx, dy, dz = d[:, 0], d[:, 1], d[:, 2]
         Q1 = torch.stack([
-            torch.ones_like(dx), dx, dy, dz, dx * dy,
-                                             dy * dz, dx * dz, dx * dy * dz],
-            dim=0)
+            torch.ones_like(dx), dx, dy, dz, dx * dy, dy * dz, dx * dz, dx * dy * dz], dim=0)
         output = torch.sum(
             P * torch.mm(B1_torch.t(), Q1).t()[:, :, None], dim=1)
 
@@ -184,7 +245,7 @@ def interpolate_volume_at_coordinates(
         coords: np.ndarray,
         mode: str = 'nearest',
         order: int = 1
-) -> np.ndarray:
+        ) -> np.ndarray:
     """ Evaluates a 3D or 4D volume data at the given coordinates using trilinear
     interpolation.
 
@@ -199,6 +260,8 @@ def interpolate_volume_at_coordinates(
         given mode (‘constant’, ‘nearest’, ‘reflect’ or ‘wrap’).
         Default is ‘nearest’.
         ('constant' uses 0.0 as a points outside the boundary)
+    order : int, optional
+        Order of interpolation
 
     Returns
     -------
@@ -223,7 +286,7 @@ def interpolate_volume_at_coordinates(
 
 def get_neighborhood_directions(
         radius: float
-) -> np.ndarray:
+        ) -> np.ndarray:
     """ Returns predefined neighborhood directions at exactly `radius` length
         For now: Use the 6 main axes as neighbors directions, plus (0,0,0)
         to keep current position
@@ -249,9 +312,8 @@ def get_neighborhood_directions(
 def is_inside_mask(
         streamlines: np.ndarray,
         mask: np.ndarray,
-        affine_vox2mask: np.ndarray = None,
         threshold: float = 0.
-):
+        ):
     """ Checks which streamlines have their last coordinates inside a mask.
 
     Parameters
@@ -263,8 +325,6 @@ def is_inside_mask(
         by values higher or equal than `threshold` .
         NOTE: The mask coordinates can be in a different space than the
         streamlines coordinates if an affine is provided.
-    affine_vox2mask : `numpy.ndarray` with shape (4,4) (optional)
-        Tranformation that aligns streamlines on top of `mask`.
     threshold : float
         Voxels with a value higher or equal than this threshold are considered
         as part of the interior of the mask.
@@ -288,9 +348,8 @@ def is_inside_mask(
 def is_outside_mask(
         streamlines: np.ndarray,
         mask: np.ndarray,
-        affine_vox2mask: np.ndarray = None,
         threshold: float = 0.
-):
+        ):
     """ Checks which streamlines have their last coordinates outside a mask.
 
     Parameters
@@ -302,7 +361,6 @@ def is_outside_mask(
         by values higher or equal than `threshold` .
         NOTE: The mask coordinates can be in a different space than the
         streamlines coordinates if an affine is provided.
-    affine_vox2mask : `numpy.ndarray` with shape (4,4) (optional)
         Tranformation that aligns streamlines on top of `mask`.
     threshold : float
         Voxels with a value higher or equal than this threshold are considered
@@ -439,7 +497,7 @@ def is_looping(streamlines: np.ndarray, loop_threshold: float):
     ----------
     streamlines : `numpy.ndarray` of shape (n_streamlines, n_points, 3)
         Streamline coordinates in voxel space
-    looping_threshold: float
+    loop_threshold: float
         Maximum angle in degrees for the whole streamline
 
     Returns
