@@ -24,6 +24,7 @@ idx = np.array([[0, 0, 0],
                 [1, 1, 1]], dtype=np.float)
 
 
+
 # Flags enum
 class StoppingFlags(Enum):
     """ Predefined stopping flags to use when checking which streamlines
