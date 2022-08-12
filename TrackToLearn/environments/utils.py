@@ -104,9 +104,13 @@ def get_sph_channels(
         device=torch.cuda):
     N, H, P = segments.shape
     t_ = torch.arange(0, neighb_cube_dim)
-    ring_radii = torch.arange(0, neighb_cube_dim, neighb_cube_dim / no_channels)
+    ring_radii = torch.arange(0, neighb_cube_dim, neighb_cube_dim / no_channels).to(device)
 
-    neighb_indices = torch.moveaxis(torch.stack(torch.meshgrid(t_, t_, t_)), 0, -1).view(-1, 3)  # TODO: no moveais/movedim in this torch version
+    # import ipdb; ipdb.set_trace()
+
+    neighb_indices = torch.moveaxis(torch.stack(torch.meshgrid(t_, t_, t_)), 0, -1).view(-1, 3).to(device)  # TODO: no moveais/movedim in this torch version
+    no_neighb = neighb_indices.size()[0]
+
 
     flat_centers = np.concatenate(segments, axis=0)
     centers = torch.as_tensor(flat_centers).to(device)
@@ -114,38 +118,51 @@ def get_sph_channels(
     no_centers = centers.shape[0]
 
     centers = torch.repeat_interleave(centers, neighb_indices.size()[0], dim=0)
-    coords = torch.empty_like(centers)
-    coords[:, :3] += neighb_indices.repeat(no_centers, 1)
-    distances = torch.norm(centers - coords.type(torch.DoubleTensor))
+    # coords = torch.empty_like(centers)
+    # coords[:, :3] += neighb_indices.repeat(no_centers, 1)
+    coords = centers + neighb_indices.repeat(no_centers, 1)
+    distances = torch.norm(centers - coords, dim=1)
 
     no_sph_coeff = data_volume.shape[-1]
     ring_radii = torch.repeat_interleave(ring_radii, coords.size()[0])
 
     dist = Normal(ring_radii, 1.)
-    weights = dist.logprob(distances.repeat(ring_radii.size()[0]))  # TODO: no_channels instead ring_radii.size()[0] ?
 
-    # TODO: get data at coords
+    try:
+        weights = dist.log_prob(distances.repeat(no_channels))
+    except:
+        pass
+
+
     lower = torch.as_tensor([0, 0, 0]).to(device)
     upper = (torch.as_tensor(data_volume.shape[:-1]) - 1).to(device)
     coords_clipped = torch.min(torch.max(coords, lower), upper)
 
     # trick: set the weights of all clipped points to zero (to prevent double counting)
-    weights = torch.where(coords_clipped != coords, 0., weights)
-    data = data_volume[:coords_clipped[0], :coords_clipped[1], :coords_clipped[2]]
+    weight_mask = torch.all(coords_clipped == coords, dim=1).repeat(no_channels)
+    weights = torch.where(weight_mask, weights, 0.)
+    coords_clipped = coords_clipped.long()
+    data = data_volume[coords_clipped[:, 0], coords_clipped[:, 1], coords_clipped[:, 2]]
 
     # scale according to weights
-    scaled = data * weights
+    scaled = data.repeat(no_channels, 1) * weights[:, None]
 
+    scaled = scaled.view(no_neighb, N, no_channels, no_sph_coeff)
+
+    # scaled = sort_interleaved(scaled, no_channels, N)
+
+    coeff_channels = torch.sum(scaled, dim=0)
+
+    return coeff_channels
+
+
+def sort_interleaved(scaled, no_channels, N):
     # split into individual channels
-    scaled = torch.stack(torch.split(scaled, no_channels))  # check if no_channels
-
+    scaled = torch.stack(
+        torch.split(scaled, no_channels))  # check if no_channels TODO: propably slow exec. better reshape
     # split into individual batches
-    scaled = torch.stack(torch.split(scaled, H))  # check if no_channels
-
-    coeff_channels = torch.sum(scaled, dim=2)
-
-
-
+    scaled = torch.stack(torch.split(scaled, N))  # check if no_channels
+    return scaled
 
 
 # Flags enum
@@ -367,6 +384,7 @@ def get_neighborhood_directions(
 def is_inside_mask(
         streamlines: np.ndarray,
         mask: np.ndarray,
+        affine_vox2mask: np.ndarray = None,
         threshold: float = 0.
         ):
     """ Checks which streamlines have their last coordinates inside a mask.
@@ -403,6 +421,7 @@ def is_inside_mask(
 def is_outside_mask(
         streamlines: np.ndarray,
         mask: np.ndarray,
+        affine_vox2mask: np.ndarray = None,
         threshold: float = 0.
         ):
     """ Checks which streamlines have their last coordinates outside a mask.

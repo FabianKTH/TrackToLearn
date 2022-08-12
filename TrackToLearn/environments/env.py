@@ -280,7 +280,7 @@ class BaseEnv(object):
         segments = streamlines[:, :-(self.n_signal + 1):-1, :]
 
         # fabi call
-        get_sph_channels(segments, self.data_volume)
+        coeff_channels = get_sph_channels(segments, self.data_volume, device=self.device)
 
         signal = get_sh(
             segments,

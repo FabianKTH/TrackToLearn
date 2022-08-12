@@ -7,31 +7,34 @@ import time
 class IbafServer:
 
     def __init__(self, provider_host='localhost', provider_port=6000,
-                 reciever_host='localhost', reciever_port=6006):
+                 reciever_host='localhost', reciever_port=6006, dont_serve=False):
         self.server_thread = None
         self.server_args = (provider_host, provider_port, reciever_host, reciever_port)
         self.reciever = None
         self.reciever_conn = None
+        self.dont_serve = dont_serve
 
     def __enter__(self):
-        print('starting msg server')
+        if not self.dont_serve:
+            print('starting msg server')
 
-        # reciever_address = (reciever_host, reciever_port)     # family is deduced to be 'AF_INET'
-        reciever_address = (self.server_args[2], self.server_args[3])
-        self.reciever = Listener(reciever_address, authkey=b'deimudda')
-        print('waiting for reciever to connect...')
-        self.reciever_conn = self.reciever.accept()
-        self.server_thread = threading.Thread(target=self.start_server,
-                                              args=self.server_args, daemon=True)
-        self.server_thread.start()
+            # reciever_address = (reciever_host, reciever_port)     # family is deduced to be 'AF_INET'
+            reciever_address = (self.server_args[2], self.server_args[3])
+            self.reciever = Listener(reciever_address, authkey=b'deimudda')
+            print('waiting for reciever to connect...')
+            self.reciever_conn = self.reciever.accept()
+            self.server_thread = threading.Thread(target=self.start_server,
+                                                  args=self.server_args, daemon=True)
+            self.server_thread.start()
 
     def __exit__(self, type_, value_, traceback_):
-        print('shutting down msg server')
-        if self.reciever_conn is not None:
-            self.reciever_conn.close()
-        if self.reciever is not None:
-            self.reciever.close()
-        # self.server_thread.join()
+        if not self.dont_serve:
+            print('shutting down msg server')
+            if self.reciever_conn is not None:
+                self.reciever_conn.close()
+            if self.reciever is not None:
+                self.reciever.close()
+            # self.server_thread.join()
 
     # @staticmethod
     def start_server(self, provider_host='localhost', provider_port=6000,
@@ -92,6 +95,10 @@ class IbafServer:
             conn.close()
         except (ConnectionResetError, ConnectionRefusedError):
             print('msg provide failed')
+        except Exception as e_:
+            # something else went wrong (maybe server is in dont_serve mode)
+            print(e_)
+
 
     @staticmethod
     def start_reciever(host='localhost', port=6006):
