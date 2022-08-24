@@ -12,8 +12,7 @@ from typing import Callable, Dict, Tuple
 
 from TrackToLearn.datasets.utils import (
     convert_length_mm2vox,
-    TractographyData,
-)
+    TractographyData)
 from TrackToLearn.environments.utils import (
     get_neighborhood_directions,
     get_sh,
@@ -23,9 +22,10 @@ from TrackToLearn.environments.utils import (
     is_too_long,
     StoppingFlags,
     get_sph_channels)
-
+from TrackToLearn.environments.rotation_utils import dirs_to_sph_channels
 from TrackToLearn.fabi_utils.communication import IbafServer
 import time
+
 
 class BaseEnv(object):
     """
@@ -301,6 +301,8 @@ class BaseEnv(object):
             dirs = streamlines[:, 1:, :] - streamlines[:, :-1, :]
             previous_dirs[:, :min(dirs.shape[1], self.n_dirs), :] = \
                 dirs[:, :-(self.n_dirs + 1):-1, :]
+
+        dir_channels = dirs_to_sph_channels(previous_dirs)
 
         dir_inputs = torch.reshape(torch.as_tensor(previous_dirs,
                                                    device=self.device),

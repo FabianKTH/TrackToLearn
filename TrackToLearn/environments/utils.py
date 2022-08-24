@@ -3,7 +3,6 @@ from enum import Enum
 import numpy as np
 import torch
 from scipy.ndimage.interpolation import map_coordinates
-from torch import Tensor
 from torch.distributions.normal import Normal
 
 
@@ -26,76 +25,6 @@ idx = np.array([[0, 0, 0],
                 [1, 1, 1]], dtype=np.float)
 
 
-# cpy paste from https://github.com/numpy/numpy/issues/5228
-def cart2sph(x, y, z):
-    hxy = np.hypot(x, y)
-    r = np.hypot(hxy, z)
-    el = np.arctan2(z, hxy)
-    az = np.arctan2(y, x)
-    return az, el, r
-
-
-def sph2cart(az, el, r):
-    rcos_theta = r * np.cos(el)
-    x = rcos_theta * np.cos(az)
-    y = rcos_theta * np.sin(az)
-    z = r * np.sin(el)
-    return x, y, z
-
-
-def angle_between_two_vec(v1, v2):
-    """ Returns the angle in radians between vectors 'v1' and 'v2'::
-    (from https://stackoverflow.com/a/13849249)
-    """
-
-    def unit_vector(vector):
-        """ Returns the unit vector of the vector.  """
-        return vector / np.linalg.norm(vector)
-
-    v1_u = unit_vector(v1)
-    v2_u = unit_vector(v2)
-    return np.arccos(np.clip(np.dot(v1_u, v2_u), -1.0, 1.0))
-
-
-def get_neighbour_indices(center, data_shape, neighb_size):
-    limit_low = np.array([0, 0, 0])
-    limit_high = np.array(data_shape) - 1  # TODO: no ":-1"
-    c = center
-    nb = neighb_size
-
-    indices_unclipped = np.mgrid[c[0] - nb: c[0] + nb + 1,
-                                 c[1] - nb: c[1] + nb + 1,
-                                 c[2] - nb: c[2] + nb + 1].transpose(
-        1, 2, 3, 0).reshape(-1, 3, order='f')
-
-    # import ipdb; ipdb.set_trace()
-    indices = indices_unclipped[np.invert(np.any(indices_unclipped < limit_low, axis=1))]
-    indices = indices[np.invert(np.any(indices > limit_high, axis=1))]
-    # indices = np.min(np.max(indices_unclipped, limit_low), limit_high)
-    # return list(indices)
-    return indices
-
-
-def get_input_channels(indices, center, data, data_shape, no_channels, neighb_size, scale_pdf=1.):
-    distances = np.linalg.norm(indices - center, axis=1)
-    ring_radii = np.arange(0, neighb_size, neighb_size / no_channels)
-    indices_flat = np.ravel_multi_index(
-        indices.astype(int).T,
-        data_shape[:-1],
-        order='f')
-    no_sph_coeff = data_shape[-1]
-
-    channels = list()
-
-    for radius in ring_radii:
-        weights = np.linalg.norm.pdf(distances, loc=radius, scale=scale_pdf)
-        weighted_sph_coeff = np.repeat(weights[:, np.newaxis], no_sph_coeff,
-                                       axis=1) * data[indices_flat]
-        channels.append(weighted_sph_coeff.sum(axis=0))
-
-    return channels
-
-
 def get_sph_channels(
         segments,
         data_volume,
@@ -108,9 +37,9 @@ def get_sph_channels(
 
     # import ipdb; ipdb.set_trace()
 
-    neighb_indices = torch.moveaxis(torch.stack(torch.meshgrid(t_, t_, t_)), 0, -1).view(-1, 3).to(device)  # TODO: no moveais/movedim in this torch version
+    neighb_indices = torch.moveaxis(torch.stack(torch.meshgrid(t_, t_, t_)), 0, -1).view(-1, 3).to(
+        device)  # TODO: no moveais/movedim in this torch version
     no_neighb = neighb_indices.size()[0]
-
 
     flat_centers = np.concatenate(segments, axis=0)
     centers = torch.as_tensor(flat_centers).to(device)
@@ -128,11 +57,7 @@ def get_sph_channels(
 
     dist = Normal(ring_radii, 1.)
 
-    try:
-        weights = dist.log_prob(distances.repeat(no_channels))
-    except:
-        pass
-
+    weights = dist.log_prob(distances.repeat(no_channels))
 
     lower = torch.as_tensor([0, 0, 0]).to(device)
     upper = (torch.as_tensor(data_volume.shape[:-1]) - 1).to(device)
