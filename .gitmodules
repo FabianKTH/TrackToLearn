@@ -1,0 +1,3 @@
+[submodule "p3_spharm-net"]
+	path = p3_spharm-net
+	url = git@gits-15.sys.kth.se:fabiansi/p3_spharm-net.git
