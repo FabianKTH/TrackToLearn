@@ -30,7 +30,7 @@ def get_sph_channels(
         data_volume,
         no_channels=3,
         neighb_cube_dim=5,
-        device=torch.cuda):
+        device=torch.device("cuda")):
     N, H, P = segments.shape
     t_ = torch.arange(0, neighb_cube_dim)
     ring_radii = torch.arange(0, neighb_cube_dim, neighb_cube_dim / no_channels).to(device)
