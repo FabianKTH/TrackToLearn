@@ -5,7 +5,54 @@ import torch
 from scipy.ndimage.interpolation import map_coordinates
 from torch.distributions.normal import Normal
 
+from TrackToLearn.environments.rotation_utils import dirs_to_sph_channels
 
+
+def _antipod_lmax(l_max):
+    assert not l_max % 2, f'l_max {l_max} not even!'
+
+    idx_list = list()
+    m = (l_max + 1) * (l_max // 2 + 1)
+    n = (l_max + 1) ** 2
+
+    even_idx = list(range(m))
+    odd_idx = list(range(m, n))
+
+    # print(f'l_max: {l_max}')
+    # print(f'm: {m}')
+
+    for l in range(l_max + 1):
+        k = 2 * l + 1
+        # n = (l)**2
+
+        # print(idx_list)
+
+        if not l % 2:
+            # even
+            # l_even += 1
+            # idx_list.extend(list(range( int(n), int(n+k) )))
+            for _ in range(k):
+                idx_list.append(even_idx.pop(0))
+        else:
+            # l_odd += 1
+            # idx_list.extend(list(range( int(n+m), int(n+m+k) )))
+            for _ in range(k):
+                idx_list.append(odd_idx.pop(0))
+
+    return idx_list
+
+
+def _init_antipod_dict(l_max=8):
+    assert not l_max % 2, f'l_max {l_max} not even!'
+
+    antipod_dict = dict()
+    for l in range(0, l_max + 1, 2):
+        antipod_dict[l] = _antipod_lmax(l)
+
+    return antipod_dict
+
+
+# globals that hold indice mappings etc
 B1 = np.array([[1, 0, 0, 0, 0, 0, 0, 0],
                [-1, 0, 0, 0, 1, 0, 0, 0],
                [-1, 0, 1, 0, 0, 0, 0, 0],
@@ -24,10 +71,13 @@ idx = np.array([[0, 0, 0],
                 [1, 1, 0],
                 [1, 1, 1]], dtype=np.float)
 
+antipod_dict = _init_antipod_dict(8)  # initialize the dict to have it pre-cached here
+
 
 def get_sph_channels(
         segments,
         data_volume,
+        previous_dirs,
         no_channels=3,
         neighb_cube_dim=5,
         device=torch.device("cuda")):
@@ -35,20 +85,14 @@ def get_sph_channels(
     t_ = torch.arange(0, neighb_cube_dim)
     ring_radii = torch.arange(0, neighb_cube_dim, neighb_cube_dim / no_channels).to(device)
 
-    # import ipdb; ipdb.set_trace()
-
     neighb_indices = torch.moveaxis(torch.stack(torch.meshgrid(t_, t_, t_)), 0, -1).view(-1, 3).to(
-        device)  # TODO: no moveais/movedim in this torch version
+        device)
     no_neighb = neighb_indices.size()[0]
 
     flat_centers = np.concatenate(segments, axis=0)
     centers = torch.as_tensor(flat_centers).to(device)
-
     no_centers = centers.shape[0]
-
     centers = torch.repeat_interleave(centers, neighb_indices.size()[0], dim=0)
-    # coords = torch.empty_like(centers)
-    # coords[:, :3] += neighb_indices.repeat(no_centers, 1)
     coords = centers + neighb_indices.repeat(no_centers, 1)
     distances = torch.norm(centers - coords, dim=1)
 
@@ -77,6 +121,36 @@ def get_sph_channels(
     # scaled = sort_interleaved(scaled, no_channels, N)
 
     coeff_channels = torch.sum(scaled, dim=0)
+
+    coeff_channels = assemble_channels(coeff_channels, previous_dirs, N, no_channels, no_sph_coeff, device)
+
+    return coeff_channels
+
+
+def assemble_channels(coeff_channels, previous_dirs, N, no_channels, no_sph_coeff, device):
+    """
+    does all the re-ordering and adds directial channel
+    """
+
+    # zero-padding for all even degree sph harm (podal <-> antipodal)
+    l_max = -1.5 + np.sqrt(0.25 + 2 * no_sph_coeff)  # from no_sph = (l + 1)(l/2 + 1)
+    antipod_idx = antipod_dict[int(l_max)]
+    new_no_coeff = len(antipod_idx)
+    idx_expanded = torch.tensor(antipod_idx).to(device).expand([N, no_channels, new_no_coeff])
+    coeff_channels = torch.nn.functional.pad(coeff_channels, (0, new_no_coeff - no_sph_coeff))
+    coeff_channels = torch.gather(coeff_channels.view([-1, new_no_coeff]),
+                                  1,
+                                  idx_expanded.view([-1, new_no_coeff])
+                                  ).view(N, no_channels, new_no_coeff)
+
+    # add also the additional directional channel
+    dir_channel = dirs_to_sph_channels(previous_dirs)
+
+    # pad also the directional component
+    dir_channel = torch.nn.functional.pad(dir_channel, (0, new_no_coeff - dir_channel.size(-1)))
+
+    # combine channels to form input
+    coeff_channels = torch.cat([coeff_channels, dir_channel[:, None]], dim=1)
 
     return coeff_channels
 
@@ -200,7 +274,7 @@ def torch_trilinear_interpolation(
         # Fetch volume data at indices
         P = volume[
             indices[:, 0], indices[:, 1], indices[:, 2]
-            ].reshape((coords.shape[0], -1)).t()
+        ].reshape((coords.shape[0], -1)).t()
 
         d = coords - torch.floor(coords)
         dx, dy, dz = d[:, 0], d[:, 1], d[:, 2]

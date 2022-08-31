@@ -279,9 +279,6 @@ class BaseEnv(object):
 
         segments = streamlines[:, :-(self.n_signal + 1):-1, :]
 
-        # fabi call
-        coeff_channels = get_sph_channels(segments, self.data_volume, device=self.device)
-
         signal = get_sh(
             segments,
             self.data_volume,
@@ -301,8 +298,16 @@ class BaseEnv(object):
             dirs = streamlines[:, 1:, :] - streamlines[:, :-1, :]
             previous_dirs[:, :min(dirs.shape[1], self.n_dirs), :] = \
                 dirs[:, :-(self.n_dirs + 1):-1, :]
+        
+        # fabi call
+        coeff_channels = get_sph_channels(
+                segments, 
+                self.data_volume,
+                previous_dirs,  
+                device=self.device
+        )
 
-        dir_channels = dirs_to_sph_channels(previous_dirs)
+        # dir_channels = dirs_to_sph_channels(previous_dirs)
 
         dir_inputs = torch.reshape(torch.as_tensor(previous_dirs,
                                                    device=self.device),
