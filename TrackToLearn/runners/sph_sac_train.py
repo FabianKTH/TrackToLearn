@@ -1,29 +1,26 @@
 #!/usr/bin/env python
 import argparse
-import comet_ml  # noqa: F401 ugh
 import json
 import os
-import torch
-
 from argparse import RawTextHelpFormatter
-from comet_ml import Experiment
 from os.path import join as pjoin
 
-from TrackToLearn.algorithms.sac import SAC
+import comet_ml  # noqa: F401 ugh
+import torch
+from comet_ml import Experiment
+
+from TrackToLearn.algorithms.sph_sac import SPHSAC
+from TrackToLearn.fabi_utils.communication import IbafServer
 from TrackToLearn.runners.experiment import (
     add_data_args,
     add_environment_args,
     add_experiment_args,
     add_model_args,
     add_tracking_args)
-from TrackToLearn.runners.train import (
-    add_rl_args,
-    TrackToLearnTraining)
-from TrackToLearn.fabi_utils.communication import IbafServer
-
+from TrackToLearn.runners.train import (TrackToLearnTraining, add_rl_args)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-assert(torch.cuda.is_available())
+assert (torch.cuda.is_available())
 
 
 class SACTrackToLearnTraining(TrackToLearnTraining):
@@ -32,49 +29,56 @@ class SACTrackToLearnTraining(TrackToLearnTraining):
     """
 
     def __init__(
-        self,
-        # Dataset params
-        path: str,
-        experiment: str,
-        name: str,
-        dataset_file: str,
-        subject_id: str,
-        test_dataset_file: str,
-        test_subject_id: str,
-        reference_file: str,
-        ground_truth_folder: str,
-        # SAC params
-        max_ep: int,
-        log_interval: int,
-        action_std: float,
-        valid_noise: float,
-        lr: float,
-        gamma: float,
-        alpha: float,
-        training_batch_size: int,
-        # Env params
-        n_seeds_per_voxel: int,
-        max_angle: float,
-        min_length: int,
-        max_length: int,
-        step_size: float,  # Step size (in mm)
-        tracking_batch_size: int,
-        n_signal: int,
-        n_dirs: int,
-        # Model params
-        n_latent_var: int,
-        hidden_layers: int,
-        add_neighborhood: float,
-        # Experiment params
-        use_gpu: bool,
-        rng_seed: int,
-        comet_experiment: Experiment,
-        render: bool,
-        run_tractometer: bool,
-        load_policy: str,
-        # Fabi params
-        spheredir: str,
-    ):
+            self,
+            # Dataset params
+            path: str,
+            experiment: str,
+            name: str,
+            dataset_file: str,
+            subject_id: str,
+            test_dataset_file: str,
+            test_subject_id: str,
+            reference_file: str,
+            ground_truth_folder: str,
+            # SAC params
+            max_ep: int,
+            log_interval: int,
+            action_std: float,
+            valid_noise: float,
+            lr: float,
+            gamma: float,
+            alpha: float,
+            training_batch_size: int,
+            # Env params
+            n_seeds_per_voxel: int,
+            max_angle: float,
+            min_length: int,
+            max_length: int,
+            step_size: float,  # Step size (in mm)
+            tracking_batch_size: int,
+            n_signal: int,
+            n_dirs: int,
+            # Model params
+            n_latent_var: int,
+            hidden_layers: int,
+            add_neighborhood: float,
+            # Experiment params
+            use_gpu: bool,
+            rng_seed: int,
+            comet_experiment: Experiment,
+            render: bool,
+            run_tractometer: bool,
+            load_policy: str,
+            # Fabi params
+            spharmnet_sphere: str,
+            spharmnet_in_ch: int,
+            spharmnet_C: int,
+            spharmnet_L: int,
+            spharmnet_D: int,
+            spharmnet_interval: int,
+            spharmnet_threads: int,
+            spharmnet_verbose: bool,
+            ):
         """
         Parameters
         ----------
@@ -143,12 +147,22 @@ class SACTrackToLearnTraining(TrackToLearnTraining):
             doing w.r.t. ground truth data
         load_policy: str
             Path to pretrained policy
-        spheredir: str
+        spharmnet_sphere: str
             file of vtk sphere mesh
         """
 
         self.training_batch_size = training_batch_size
         self.alpha = alpha
+
+        # fabi
+        self.spharmnet_sphere   = spharmnet_sphere
+        self.spharmnet_in_ch    = spharmnet_in_ch
+        self.spharmnet_C        = spharmnet_C
+        self.spharmnet_L        = spharmnet_L
+        self.spharmnet_D        = spharmnet_D
+        self.spharmnet_interval = spharmnet_interval
+        self.spharmnet_threads  = spharmnet_threads
+        self.spharmnet_verbose  = spharmnet_verbose
 
         super().__init__(
             # Dataset params
@@ -188,7 +202,7 @@ class SACTrackToLearnTraining(TrackToLearnTraining):
             render,
             run_tractometer,
             load_policy,
-        )
+            )
 
     def save_hyperparameters(self):
         self.hyperparameters = {
@@ -223,13 +237,22 @@ class SACTrackToLearnTraining(TrackToLearnTraining):
             'n_signal': self.n_signal,
             'n_dirs': self.n_dirs,
             # Reward parameters
-        }
+            # Spharmnet parameters
+            'spharmnet_sphere':     self.spharmnet_sphere,
+            'spharmnet_in_ch':      self.spharmnet_in_ch,
+            'spharmnet_C':          self.spharmnet_C,
+            'spharmnet_L':          self.spharmnet_L,
+            'spharmnet_D':          self.spharmnet_D,
+            'spharmnet_interval':   self.spharmnet_interval,
+            'spharmnet_threads':    self.spharmnet_threads,
+            'spharmnet_verbose':    self.spharmnet_verbose,
+            }
         directory = os.path.dirname(pjoin(self.experiment_path, "model"))
 
         with open(
-            pjoin(directory, "hyperparameters.json"),
-            'w'
-        ) as json_file:
+                pjoin(directory, "hyperparameters.json"),
+                'w'
+                ) as json_file:
             json_file.write(
                 json.dumps(
                     self.hyperparameters,
@@ -237,8 +260,16 @@ class SACTrackToLearnTraining(TrackToLearnTraining):
                     separators=(',', ': ')))
 
     def get_alg(self):
-        alg = SAC(
+        alg = SPHSAC(
             self.input_size,
+            self.spharmnet_sphere,
+            self.spharmnet_in_ch,
+            self.spharmnet_C,
+            self.spharmnet_L,
+            self.spharmnet_D,
+            self.spharmnet_interval,
+            self.spharmnet_threads,
+            self.spharmnet_verbose,
             3,
             self.n_latent_var,
             self.hidden_layers,
@@ -255,13 +286,28 @@ class SACTrackToLearnTraining(TrackToLearnTraining):
 def add_sac_args(parser):
     parser.add_argument('--alpha', default=0.2, type=float,
                         help='Temperature parameter for SAC')
-    parser.add_argument('--training_batch_size', default=2**14, type=int,
+    parser.add_argument('--training_batch_size', default=2 ** 14, type=int,
                         help='Number of seeds used per episode')
 
 
 def add_fabi_args(parser):
-    parser.add_argument('--spheredir', default='./sphere/ico6.vtk', type=str,
-                        help='vtk mesh to tesselate the sphere for s2 learning')
+    parser.add_argument('--spharmnet_sphere', default='./sphere/ico6.vtk', type=str,
+                        help='Sphere mesh file. VTK (ASCII) < v4.0 or FreeSurfer format')
+    parser.add_argument('--spharmnet_in_ch', type=int, default=4,
+                        help='# of input geometric features')
+    parser.add_argument('--spharmnet_C', type=int, default=8,
+                        help='# of channels in the entry layer')
+    parser.add_argument('--spharmnet_L', type=int, default=6,
+                        help='Spectral bandwidth that supports individual component learning')
+    parser.add_argument('--spharmnet_D', type=int, default=None,
+                        help='Depth of encoding/decoding levels (currently not supported)')
+    parser.add_argument('--spharmnet_interval', type=int, default=5,
+                        help='Interval of anchor points')
+    parser.add_argument('--spharmnet_threads', type=int, default=1,
+                        help='of CPU threads for basis reconstruction. ' + \
+                             'Useful if the unit sphere has dense tesselation')
+    parser.add_argument('--spharmnet_verbose', type=bool, default=False,
+                        help='prints additional info for spharmnet components')
 
 
 def parse_args():
@@ -334,8 +380,15 @@ def main():
         args.run_tractometer,
         args.load_policy,
         # Fabi params
-        args.spheredir,
-    )
+        args.spharmnet_sphere,
+        args.spharmnet_in_ch,
+        args.spharmnet_C,
+        args.spharmnet_L,
+        args.spharmnet_D,
+        args.spharmnet_interval,
+        args.spharmnet_threads,
+        args.spharmnet_verbose,
+        )
     sac_experiment.run()
 
 

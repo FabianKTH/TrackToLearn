@@ -300,14 +300,14 @@ class BaseEnv(object):
                 dirs[:, :-(self.n_dirs + 1):-1, :]
         
         # fabi call
+        """
         coeff_channels = get_sph_channels(
                 segments, 
                 self.data_volume,
                 previous_dirs,  
                 device=self.device
         )
-
-        # dir_channels = dirs_to_sph_channels(previous_dirs)
+        """
 
         dir_inputs = torch.reshape(torch.as_tensor(previous_dirs,
                                                    device=self.device),
