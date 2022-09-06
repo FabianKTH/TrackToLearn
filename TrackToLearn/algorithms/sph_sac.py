@@ -12,6 +12,7 @@ from spharmnet.core.models import Down, Final
 from spharmnet.lib.io import read_mesh
 from spharmnet.lib.sphere import spharm_real, vertex_area
 from torch import nn
+import torch.nn.functional as F
 
 from TrackToLearn.algorithms.rl import RLAlgorithm
 from TrackToLearn.environments.env import BaseEnv
@@ -167,6 +168,12 @@ class SPH2VEC(nn.Module):
 
         return v
 
+    def process_numpy(self, x):
+        x = torch.Tensor(x, device=device)
+        x = self.forward(x)
+
+        return x.cpu().numpy()
+
 
 class PadToLmax(nn.Module):
     """
@@ -179,7 +186,7 @@ class PadToLmax(nn.Module):
         no_sphin = (l_in + 1)**2
         no_sphout = (l_out + 1)**2
 
-        self.pad = [0, no_sphout - no_sphin]
+        self.pad = [0, no_sphout - no_sphin + 1]
 
     def forward(self, x):
         return nn.functional.pad(x, self.pad, value=0.)
@@ -194,7 +201,7 @@ class Actor(nn.Module):
         self,
         sphere: str,
         in_ch: int = 4,
-        C: int = 8,
+        C: int = 4,
         L: int = 6,
         D: int = None,
         interval: int = 5,
@@ -279,7 +286,7 @@ class Actor(nn.Module):
         # note: why is this required? ...
         self.down = nn.ModuleList(self.down)
 
-    def forward(self, x):
+    def forward(self, x): # 'stochastic' not implemented/used
         x = self.in_(x)
         for l_idx, layer in enumerate(self.down):
             # print(f'l_idx {l_idx}, x.shape {x.shape}, x.device {x.device}')
@@ -290,7 +297,26 @@ class Actor(nn.Module):
         # sph with L=1 to direction
         # x = self.out_dir(x)
 
-        return x, None  # None here just to fit outer call structure TODO: fix
+        # x = torch.squeeze(x)
+
+        return x  # None here just to fit outer call structure TODO: fix
+
+
+class CriticFinal(nn.Module):
+    def __init__(self, in_features, out_features):
+        super().__init__()
+
+        self.in_features = in_features
+        self.out_features = out_features
+
+        self.layer = nn.Linear(self.in_features, self.out_features)
+
+    def forward(self, x):
+
+        x = x.view([-1, self.in_features])
+        x = self.layer(x)
+
+        return x
 
 
 class Critic(nn.Module):
@@ -303,7 +329,7 @@ class Critic(nn.Module):
             self,
             sphere: str,
             in_ch: int = 5,
-            C: int = 8,
+            C: int = 4,
             L: int = 6,
             D: int = None,
             interval: int = 5,
@@ -348,6 +374,8 @@ class Critic(nn.Module):
         self.q2_down = []
 
         ch_inc = 2
+
+        in_ch += 1  # account for the additional dimension for the action channel
         out_ch = C  # Note: this is the running size of one layers output, not the net output
 
         v, f = read_mesh(sphere)
@@ -361,7 +389,7 @@ class Critic(nn.Module):
         Y_inv = Y.T
 
         # first: transform sph harm to spherical signal
-        self.in_ = ISHT(Y)
+        self.isht = ISHT(Y)
 
         # pad action (action is expected to be of size 4 for sph vec for l=1)
         self.pad_action = PadToLmax(l_in=1, l_out=L)
@@ -380,11 +408,14 @@ class Critic(nn.Module):
 
         if verbose:
             print("(q1,q2)_final\t| C:{} -> {}\t| L:{}".format(in_ch, 1, 0))
-        self.q1_final = Final(Y, Y_inv, area, in_ch, 1, 0, interval)
-        self.q2_final = Final(Y, Y_inv, area, in_ch, 1, 0, interval)
 
-        # lastly: lift signal back into harmonics domain
-        self.out = SHT(L=0, Y_inv=Y_inv, area=area)
+        # lift signal back into harmonics domain
+        self.sth = SHT(L=L, Y_inv=Y_inv, area=area)
+
+        # self.q1_final = Final(Y, Y_inv, area, in_ch, 1, 0, interval)
+        self.q1_final = CriticFinal(in_ch * (L + 1)**2, 1)
+        # self.q2_final = Final(Y, Y_inv, area, in_ch, 1, 0, interval)
+        self.q2_final = CriticFinal(in_ch * (L + 1)**2, 1)
 
         # note: why is this required? ...
         self.q1_down = nn.ModuleList(self.q1_down)
@@ -392,43 +423,53 @@ class Critic(nn.Module):
 
     def forward(self, state, action):
         # isht of state
-        state = self.in_(state)
+        # state = self.in_(state)
 
         # pad action
-        action = self.pad_action(action)
+        action = self.pad_action(action)[:, None, :]
 
         # combine state and action to input
         q1 = torch.cat([state, action], 1)
         q2 = torch.cat([state, action], 1)
 
+        # isht of the input channels
+        q1 = self.isht(q1)
+        q2 = self.isht(q2)
+
         # q1
         for l_idx, layer in enumerate(self.q1_down):
             # print(f'(q1) l_idx {l_idx}, x.shape {x.shape}, x.device {x.device}')
             q1 = layer(q1)
+        q1 = self.sth(q1)
         q1 = self.q1_final(q1)
 
         # q2
         for l_idx, layer in enumerate(self.q1_down):
             # print(f'(q2) l_idx {l_idx}, x.shape {x.shape}, x.device {x.device}')
             q2 = layer(q2)
+        q2 = self.sth(q2)
         q2 = self.q2_final(q2)
 
         return q1, q2
 
     def Q1(self, state, action):
         # isht of state
-        state = self.in_(state)
+        # state = self.in_(state)
 
         # pad action
-        action = self.pad_action(action)
+        # action = self.pad_action(action)
 
         # combine state and action to input
         q1 = torch.cat([state, action], 1)
+
+        # isth of input
+        q1 = self.isht(q1)
 
         # q1
         for l_idx, layer in enumerate(self.q1_down):
             # print(f'(q1) l_idx {l_idx}, x.shape {x.shape}, x.device {x.device}')
             q1 = layer(q1)
+        q1 = self.sth(q1)
         q1 = self.q1_final(q1)
 
         return q1
@@ -490,10 +531,11 @@ class ActorCritic:
             verbose,
         ).to(device)
 
+        self.sph2vec = SPH2VEC().to(device)
+
     def act(
         self,
         state: torch.Tensor,
-        stochastic: bool = True,
     ) -> (torch.Tensor, torch.Tensor):
         """ Select action according to actor
 
@@ -507,8 +549,15 @@ class ActorCritic:
             action: torch.Tensor
                 Action selected by the policy
         """
-        a, logprob = self.actor(state, stochastic)
-        return a, logprob
+        a = self.actor(state)
+
+        # transform sph vec to cartesian direction
+        a = self.sph2vec(a)
+
+        a = a.view([-1, 3])
+        # a = torch.squeeze(a)
+
+        return a
 
     def select_action(self, state: np.array, stochastic=True) -> np.ndarray:
         """ Move state to torch tensor, select action and
@@ -531,7 +580,7 @@ class ActorCritic:
             state = state[None, :]
 
         state = torch.as_tensor(state, dtype=torch.float32, device=device)
-        action, _ = self.act(state, stochastic)
+        action = self.act(state)
 
         return action.cpu().data.numpy()
 
@@ -609,7 +658,7 @@ class SPHSAC(RLAlgorithm):
 
     def __init__(
         self,
-        input_size: int,
+        input_size: [int, int],
         sphere: str,
         in_ch: int,
         C: int,
@@ -632,7 +681,7 @@ class SPHSAC(RLAlgorithm):
         """
         Parameters
         ----------
-        input_size: int
+        input_size: [int, int]
             Input size for the model
         sphere: str
             Path of a vtk mesh file
@@ -694,6 +743,17 @@ class SPHSAC(RLAlgorithm):
             self.policy.critic.parameters(), lr=lr)
 
         # SAC-specific parameters
+        # self.max_action = 1.
+        # self.on_policy = False
+
+        # self.start_timesteps = 1000
+        # self.total_it = 0
+        # self.policy_freq = 2
+        # self.tau = 0.005
+        # self.noise_clip = 0.5
+        # self.alpha = alpha
+
+        # TD3-specific parameters
         self.max_action = 1.
         self.on_policy = False
 
@@ -701,12 +761,11 @@ class SPHSAC(RLAlgorithm):
         self.total_it = 0
         self.policy_freq = 2
         self.tau = 0.005
-        self.noise_clip = 0.5
-        self.alpha = alpha
+        self.noise_clip = 1
 
         # Replay buffer
         self.replay_buffer = ReplayBuffer(
-            input_size, action_size)
+            [in_ch, (L+1)**2], action_size)
 
         # Fabi spherical cnn parameters
         self.sphere = sphere
@@ -717,14 +776,16 @@ class SPHSAC(RLAlgorithm):
         self.interval = interval
         self.threads  = threads
         self.verbose  = verbose
+        self.sph2vec = SPH2VEC()
+        self.pad_lmax = PadToLmax(l_in=1, l_out=L)
 
         self.rng = rng
 
     def _episode(
-        self,
-        initial_state: np.ndarray,
-        env: BaseEnv,
-    ) -> Tuple[Tractogram, float, float, float, int]:
+            self,
+            initial_state: np.ndarray,
+            env: BaseEnv,
+            ) -> Tuple[Tractogram, float, float, float, int]:
         """
         Main loop for the algorithm
         From a starting state, run the model until the env. says its done
@@ -765,14 +826,15 @@ class SPHSAC(RLAlgorithm):
         while not np.all(done):
 
             # Select action according to policy + noise for exploration
-            action = self.policy.select_action(
-                np.array(state), stochastic=True)
+            a = self.policy.select_action(np.array(state))
+            action = (
+                    a + self.rng.normal(
+                0, self.max_action * self.action_std,
+                size=a.shape)
+            ).clip(-self.max_action, self.max_action)
 
             self.t += action.shape[0]
             # Perform action
-
-            # import ipdb; ipdb.set_trace()
-
             next_state, reward, done, _ = env.step(action)
             done_bool = done
 
@@ -780,14 +842,13 @@ class SPHSAC(RLAlgorithm):
             # WARNING: This is a bit of a trick and I'm not entirely sure this
             # is legal. This is effectively adding to the replay buffer as if
             # I had n agents gathering transitions instead of a single one.
-            # This is not mentionned in the SAC paper. PPO2 does use multiple
+            # This is not mentionned in the TD3 paper. PPO2 does use multiple
             # learners, though.
             # I'm keeping it since since it reaaaally speeds up training with
             # no visible costs
             self.replay_buffer.add(
-                state, action,
-                next_state, reward[..., None],
-                done_bool[..., None])
+                state, action, next_state,
+                reward[..., None], done_bool[..., None])
 
             running_reward += sum(reward)
 
@@ -820,12 +881,12 @@ class SPHSAC(RLAlgorithm):
             episode_length)
 
     def update(
-        self,
-        replay_buffer: ReplayBuffer,
-        batch_size: int = 2**12
-    ) -> Tuple[float, float]:
+            self,
+            replay_buffer: ReplayBuffer,
+            batch_size: int = 2**12
+            ) -> Tuple[float, float]:
         """
-        TODO: Add motivation behind SAC update ("pessimistic" two-critic
+        TODO: Add motivation behind TD3 update ("pessimistic" two-critic
         update, policy that implicitely maximizes the q-function, etc.)
 
         Parameters
@@ -855,60 +916,64 @@ class SPHSAC(RLAlgorithm):
             replay_buffer.sample(batch_size)
 
         with torch.no_grad():
-            # Target actions come from *current* policy
-            next_action, logp_next_action = self.policy.act(next_state)
+            # Select next action according to policy and add clipped noise
+            noise = (
+                    torch.randn_like(action) * (self.action_std * 2)
+            ).clamp(-self.noise_clip, self.noise_clip)
 
-            # Compute the target Q value
+            next_action = torch.squeeze(self.sph2vec(self.target.actor(next_state)))
+            next_action = (next_action + noise
+            ).clamp(-self.max_action, self.max_action)
+
+            # Compute the target Q value for s'
             target_Q1, target_Q2 = self.target.critic(
                 next_state, next_action)
             target_Q = torch.min(target_Q1, target_Q2)
+            target_Q = reward + not_done * self.gamma * target_Q
 
-            backup = reward + self.gamma * not_done * \
-                (target_Q - self.alpha * logp_next_action)
-
-        # Get current Q estimates
+        # Get current Q estimates for s
         current_Q1, current_Q2 = self.policy.critic(
             state, action)
 
-        # MSE loss against Bellman backup
-        loss_q1 = ((current_Q1 - backup)**2).mean()
-        loss_q2 = ((current_Q2 - backup)**2).mean()
-        critic_loss = loss_q1 + loss_q2
+        # Compute critic loss Q(s,a) - r + yQ(s',a)
+        critic_loss = F.mse_loss(current_Q1, target_Q) + \
+                      F.mse_loss(current_Q2, target_Q)
 
         # Optimize the critic
         self.critic_optimizer.zero_grad()
         critic_loss.backward()
         self.critic_optimizer.step()
 
-        pi, logp_pi = self.policy.act(state)
-        q1, q2 = self.policy.critic(state, pi)
-        q_pi = torch.min(q1, q2)
+        # Delayed policy updates
+        if self.total_it % self.policy_freq == 0:
 
-        # Entropy-regularized policy loss
-        actor_loss = (self.alpha * logp_pi - q_pi).mean()
+            # Compute actor loss -Q(s,a)
+            currrent_action = self.pad_lmax(self.policy.actor(state))[..., :-1]
 
-        # Optimize the actor
-        self.actor_optimizer.zero_grad()
-        actor_loss.backward()
-        self.actor_optimizer.step()
+            actor_loss = -self.policy.critic.Q1(state, currrent_action).mean()
 
-        # Update the frozen target models
-        for param, target_param in zip(
-            self.policy.critic.parameters(),
-            self.target.critic.parameters()
-        ):
-            target_param.data.copy_(
-                self.tau * param.data + (1 - self.tau) * target_param.data)
+            # Optimize the actor
+            self.actor_optimizer.zero_grad()
+            actor_loss.backward()
+            self.actor_optimizer.step()
 
-        for param, target_param in zip(
-            self.policy.actor.parameters(),
-            self.target.actor.parameters()
-        ):
-            target_param.data.copy_(
-                self.tau * param.data + (1 - self.tau) * target_param.data
-            )
+            # Update the frozen target models
+            for param, target_param in zip(
+                    self.policy.critic.parameters(),
+                    self.target.critic.parameters()
+                    ):
+                target_param.data.copy_(
+                    self.tau * param.data + (1 - self.tau) * target_param.data)
 
-        running_actor_loss = actor_loss.detach().cpu().numpy()
+            for param, target_param in zip(
+                    self.policy.actor.parameters(),
+                    self.target.actor.parameters()
+                    ):
+                target_param.data.copy_(
+                    self.tau * param.data + (1 - self.tau) * target_param.data
+                    )
+
+            running_actor_loss = actor_loss.detach().cpu().numpy()
 
         running_critic_loss = critic_loss.detach().cpu().numpy()
 

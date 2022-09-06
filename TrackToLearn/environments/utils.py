@@ -149,6 +149,9 @@ def assemble_channels(coeff_channels, previous_dirs, N, no_channels, no_sph_coef
     # pad also the directional component
     dir_channel = torch.nn.functional.pad(dir_channel, (0, new_no_coeff - dir_channel.size(-1)))
 
+    # clear nans (e.g. from first iteration)
+    dir_channel = torch.nan_to_num(dir_channel)
+
     # combine channels to form input
     coeff_channels = torch.cat([coeff_channels, dir_channel[:, None]], dim=1)
 

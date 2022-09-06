@@ -161,6 +161,7 @@ class Tracker(BaseEnv):
             Whether the episode is done
         info: dict
         """
+
         # Scale directions to step size
         normalized_directions = directions / np.sqrt(np.sum(
             directions ** 2,

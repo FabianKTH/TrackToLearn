@@ -261,7 +261,7 @@ class SACTrackToLearnTraining(TrackToLearnTraining):
 
     def get_alg(self):
         alg = SPHSAC(
-            self.input_size,
+            self.input_size,  # TODO: we need a tuple of the size here instead
             self.spharmnet_sphere,
             self.spharmnet_in_ch,
             self.spharmnet_C,
@@ -395,5 +395,5 @@ def main():
 if __name__ == '__main__':
     # next line is for communication with client
     # TODO: read ip, port etc from params
-    with IbafServer(reciever_host="0.0.0.0", dont_serve=True) as ibaf:
+    with IbafServer(reciever_host="0.0.0.0", dont_serve=False) as ibaf:
         main()

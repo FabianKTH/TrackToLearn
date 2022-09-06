@@ -22,7 +22,7 @@ from TrackToLearn.environments.utils import (
     is_too_long,
     StoppingFlags,
     get_sph_channels)
-from TrackToLearn.environments.rotation_utils import dirs_to_sph_channels
+# from TrackToLearn.environments.rotation_utils import dirs_to_sph_channels
 from TrackToLearn.fabi_utils.communication import IbafServer
 import time
 
@@ -279,14 +279,14 @@ class BaseEnv(object):
 
         segments = streamlines[:, :-(self.n_signal + 1):-1, :]
 
-        signal = get_sh(
-            segments,
-            self.data_volume,
-            self.add_neighborhood_vox,
-            self.neighborhood_directions,
-            self.n_signal,
-            self.device
-        )
+        # signal = get_sh(
+        #     segments,
+        #     self.data_volume,
+        #     self.add_neighborhood_vox,
+        #     self.neighborhood_directions,
+        #     self.n_signal,
+        #     self.device
+        # )
 
         # import ipdb; ipdb.set_trace()
         if L >= 2:
@@ -300,19 +300,17 @@ class BaseEnv(object):
                 dirs[:, :-(self.n_dirs + 1):-1, :]
         
         # fabi call
-        """
-        coeff_channels = get_sph_channels(
+        inputs = get_sph_channels(
                 segments, 
                 self.data_volume,
                 previous_dirs,  
                 device=self.device
         )
-        """
 
-        dir_inputs = torch.reshape(torch.as_tensor(previous_dirs,
-                                                   device=self.device),
-                                   (N, self.n_dirs * P))
-        inputs = torch.cat((signal, dir_inputs), dim=-1).to(self.device)
+        # dir_inputs = torch.reshape(torch.as_tensor(previous_dirs,
+        #                                            device=self.device),
+        #                            (N, self.n_dirs * P))
+        # inputs = torch.cat((signal, dir_inputs), dim=-1).to(self.device)
         return inputs.cpu().numpy()
 
     def _filter_stopping_streamlines(
