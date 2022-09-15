@@ -82,7 +82,8 @@ def get_sph_channels(
         neighb_cube_dim=5,
         device=torch.device("cuda")):
     N, H, P = segments.shape
-    t_ = torch.arange(0, neighb_cube_dim)
+    # t_ = torch.arange(0, neighb_cube_dim)
+    t_ = torch.arange(0, neighb_cube_dim) - (neighb_cube_dim-1)/2
     ring_radii = torch.arange(0, neighb_cube_dim, neighb_cube_dim / no_channels).to(device)
 
     neighb_indices = torch.moveaxis(torch.stack(torch.meshgrid(t_, t_, t_)), 0, -1).view(-1, 3).to(
@@ -92,16 +93,18 @@ def get_sph_channels(
     flat_centers = np.concatenate(segments, axis=0)
     centers = torch.as_tensor(flat_centers).to(device)
     no_centers = centers.shape[0]
-    centers = torch.repeat_interleave(centers, neighb_indices.size()[0], dim=0)
+    centers = torch.repeat_interleave(centers, no_neighb, dim=0)
     coords = centers + neighb_indices.repeat(no_centers, 1)
-    distances = torch.norm(centers - coords, dim=1)
+    distances = torch.norm(centers - coords.round(), dim=1)  # TODO: check if rounding right here.
 
     no_sph_coeff = data_volume.shape[-1]
     ring_radii = torch.repeat_interleave(ring_radii, coords.size()[0])
 
+    # try:
     dist = Normal(ring_radii, 1.)
-
-    weights = dist.log_prob(distances.repeat(no_channels))
+    weights = torch.exp(dist.log_prob(distances.repeat(no_channels)))
+    # except ValueError:
+    #     print('ValueError in distrib')
 
     lower = torch.as_tensor([0, 0, 0]).to(device)
     upper = (torch.as_tensor(data_volume.shape[:-1]) - 1).to(device)
@@ -110,7 +113,7 @@ def get_sph_channels(
     # trick: set the weights of all clipped points to zero (to prevent double counting)
     weight_mask = torch.all(coords_clipped == coords, dim=1).repeat(no_channels)
     weights = torch.where(weight_mask, weights, 0.)
-    coords_clipped = coords_clipped.long()
+    coords_clipped = coords_clipped.round().long()  # TODO: round? should match better to convention...
     data = data_volume[coords_clipped[:, 0], coords_clipped[:, 1], coords_clipped[:, 2]]
 
     # scale according to weights
@@ -129,7 +132,7 @@ def get_sph_channels(
 
 def assemble_channels(coeff_channels, previous_dirs, N, no_channels, no_sph_coeff, device):
     """
-    does all the re-ordering and adds directial channel
+    does all the re-ordering and adds directional channel
     """
 
     # zero-padding for all even degree sph harm (podal <-> antipodal)
@@ -151,6 +154,9 @@ def assemble_channels(coeff_channels, previous_dirs, N, no_channels, no_sph_coef
 
     # clear nans (e.g. from first iteration)
     dir_channel = torch.nan_to_num(dir_channel)
+
+    if torch.any(torch.abs(dir_channel) > 1000.):
+        print('in err')
 
     # combine channels to form input
     coeff_channels = torch.cat([coeff_channels, dir_channel[:, None]], dim=1)

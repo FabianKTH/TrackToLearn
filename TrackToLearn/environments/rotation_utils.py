@@ -95,6 +95,25 @@ def dirs_to_sph_channels(dir_vecs, device=torch.device("cuda")):
     """
     assert dir_vecs.shape[-1] == 3
 
+    dir_vecs = torch.tensor(dir_vecs[:, 0], device=device)  # TODO: bit of a hack
+    N, P = dir_vecs.shape
+
+    sh_ = torch.zeros(size=[N, P + 1], device=device)
+    sh_[:, 1] = dir_vecs[:, 1]
+    sh_[:, 2] = dir_vecs[:, 2]
+    sh_[:, 3] = dir_vecs[:, 0]
+
+    return sh_
+
+
+
+def dirs_to_sph_channels_old(dir_vecs, device=torch.device("cuda")):
+    """
+    expects an array of 3D direction coordinates (in last dimension) and returns
+    corresponding spherical coefficients
+    """
+    assert dir_vecs.shape[-1] == 3
+
     dir_vecs = torch.tensor(dir_vecs[:, 0]).to(device)  # TODO: bit of a hack
 
     N, P = dir_vecs.shape

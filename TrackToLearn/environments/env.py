@@ -24,6 +24,7 @@ from TrackToLearn.environments.utils import (
     get_sph_channels)
 # from TrackToLearn.environments.rotation_utils import dirs_to_sph_channels
 from TrackToLearn.fabi_utils.communication import IbafServer
+
 import time
 
 
@@ -95,6 +96,10 @@ class BaseEnv(object):
         # Volumes and masks
         self.data_volume = torch.tensor(
             input_volume.data, dtype=torch.float32, device=device)
+
+        if self.data_volume.size()[-1] == 15:
+            self.data_volume = torch.nn.functional.pad(self.data_volume, [0, 13], value=0.)  # hack! TODO remove
+
         self.tracking_mask = tracking_mask
         self.target_mask = target_mask
 
@@ -290,8 +295,8 @@ class BaseEnv(object):
 
         # import ipdb; ipdb.set_trace()
         if L >= 2:
-            IbafServer.provide_msg(streamlines)
-            time.sleep(.1)
+            IbafServer.provide_msg({'tract': streamlines})
+            # time.sleep(.1)
 
         previous_dirs = np.zeros((N, self.n_dirs, P), dtype=np.float32)
         if L > 1:
@@ -305,13 +310,13 @@ class BaseEnv(object):
                 self.data_volume,
                 previous_dirs,  
                 device=self.device
-        )
+            ).cpu().numpy()
 
         # dir_inputs = torch.reshape(torch.as_tensor(previous_dirs,
         #                                            device=self.device),
         #                            (N, self.n_dirs * P))
         # inputs = torch.cat((signal, dir_inputs), dim=-1).to(self.device)
-        return inputs.cpu().numpy()
+        return inputs
 
     def _filter_stopping_streamlines(
             self,

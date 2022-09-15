@@ -16,6 +16,7 @@ import torch.nn.functional as F
 
 from TrackToLearn.algorithms.rl import RLAlgorithm
 from TrackToLearn.environments.env import BaseEnv
+from TrackToLearn.fabi_utils.communication import IbafServer
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -201,7 +202,7 @@ class Actor(nn.Module):
         self,
         sphere: str,
         in_ch: int = 4,
-        C: int = 4,
+        C: int = 8,
         L: int = 6,
         D: int = None,
         interval: int = 5,
@@ -277,10 +278,13 @@ class Actor(nn.Module):
             print("Final\t| C:{} -> {}\t| L:{}".format(out_ch, 1, L))
         self.final = Final(Y, Y_inv, area, out_ch, 1, L, interval)
 
-        # lastly: lift signal back into harmonics domain
+        # lift signal back into harmonics domain
         self.out = SHT(L=1, Y_inv=Y_inv, area=area)
 
-        # sph to direction vector
+        # lastly: mask 0 entry (irrelevant for direction) and normalize
+        self.out_mask = torch.tensor([0., 1., 1., 1.], requires_grad=False, device=device)
+
+        # sph to direction vector (currently not used.)
         self.out_dir = SPH2VEC()
 
         # note: why is this required? ...
@@ -293,7 +297,8 @@ class Actor(nn.Module):
             x = layer(x)
         x = self.final(x)
         x = self.out(x)
-
+        x = self.out_mask * x
+        x = F.normalize(x, dim=-1)
         # sph with L=1 to direction
         # x = self.out_dir(x)
 
@@ -329,7 +334,7 @@ class Critic(nn.Module):
             self,
             sphere: str,
             in_ch: int = 5,
-            C: int = 4,
+            C: int = 8,
             L: int = 6,
             D: int = None,
             interval: int = 5,
@@ -827,15 +832,24 @@ class SPHSAC(RLAlgorithm):
 
             # Select action according to policy + noise for exploration
             a = self.policy.select_action(np.array(state))
+
+            # TODO: this is strange. we need a re-sampling on the sphere here
+            """
             action = (
                     a + self.rng.normal(
                 0, self.max_action * self.action_std,
                 size=a.shape)
             ).clip(-self.max_action, self.max_action)
+            """
+            action = a  # TODO: hack to get it to work. remove this.
 
             self.t += action.shape[0]
             # Perform action
-            next_state, reward, done, _ = env.step(action)
+            try:
+                next_state, reward, done, _ = env.step(action)
+            except ValueError:
+                print('jaja, dei mudda')
+
             done_bool = done
 
             # Store data in replay buffer
@@ -851,6 +865,8 @@ class SPHSAC(RLAlgorithm):
                 reward[..., None], done_bool[..., None])
 
             running_reward += sum(reward)
+
+            IbafServer.provide_msg({'text': f'running_reward {running_reward}'})
 
             # Train agent after collecting sufficient data
             # TODO: Add monitors so that losses are properly tracked
@@ -883,7 +899,7 @@ class SPHSAC(RLAlgorithm):
     def update(
             self,
             replay_buffer: ReplayBuffer,
-            batch_size: int = 2**12
+            batch_size: int = 2**7  # was 2**12 before
             ) -> Tuple[float, float]:
         """
         TODO: Add motivation behind TD3 update ("pessimistic" two-critic

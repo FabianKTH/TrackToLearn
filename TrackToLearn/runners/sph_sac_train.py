@@ -395,5 +395,5 @@ def main():
 if __name__ == '__main__':
     # next line is for communication with client
     # TODO: read ip, port etc from params
-    with IbafServer(reciever_host="0.0.0.0", dont_serve=False) as ibaf:
+    with IbafServer(reciever_host="0.0.0.0", dont_serve=False, verbose=False) as ibaf:
         main()

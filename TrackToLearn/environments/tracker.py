@@ -176,7 +176,7 @@ class Tracker(BaseEnv):
 
         reward = np.zeros(self.streamlines.shape[0])
         # Compute reward if wanted. At test time, no need
-        # to compute it and slow down the tracking process
+        # to compute it and slows down the tracking process
         if self.compute_reward:
             reward = reward_streamlines_step(
                 self.streamlines[:, :self.length],
