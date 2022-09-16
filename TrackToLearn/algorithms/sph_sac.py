@@ -17,6 +17,7 @@ import torch.nn.functional as F
 from TrackToLearn.algorithms.rl import RLAlgorithm
 from TrackToLearn.environments.env import BaseEnv
 from TrackToLearn.fabi_utils.communication import IbafServer
+from TrackToLearn.environments.rotation_utils import dirs_to_sph_channels
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -84,7 +85,10 @@ class ReplayBuffer:
 
         self.state[ind] = state
         self.action[ind] = action
-        self.next_state[ind] = next_state
+        try:
+            self.next_state[ind] = next_state
+        except:
+            pass
         self.reward[ind] = reward
         self.not_done[ind] = 1. - done
 
@@ -194,6 +198,72 @@ class PadToLmax(nn.Module):
 
 
 class Actor(nn.Module):
+    """ Dummy actor for testing that only extracts the maximum from the first input channel
+
+    """
+    def __init__(
+            self,
+            sphere: str,
+            in_ch: int = 4,
+            C: int = 8,
+            L: int = 6,
+            D: int = None,
+            interval: int = 5,
+            threads: int = 1,
+            verbose: bool = False
+            ):
+
+        super().__init__()
+
+        #  spharm boilerplate
+        v, f = read_mesh(sphere)
+        v = v.astype(float)
+        area = vertex_area(v, f)
+        Y = spharm_real(v, L, threads)
+        area = torch.from_numpy(area).to(device=device, dtype=torch.float32)
+        Y = torch.from_numpy(Y).to(device=device, dtype=torch.float32)
+        Y_inv = Y.T
+
+        self.v = torch.as_tensor(v, device=device)
+
+        # transforms
+        self.isht = ISHT(Y)
+        self.sht = SHT(L=1, Y_inv=Y_inv, area=area)
+
+        self.sph2vec = SPH2VEC()
+
+    def forward(self, x):
+        bs, ch, l = x.size()
+
+        """
+        s0 = self.isht(x[:, None, 0])
+        s1 = self.isht(x[:, None, 3])
+        s = s0 + 0.01 * s1
+        y = self.sht(s)
+        """
+
+        s = self.isht(x[:, 0])
+        # torch.argsort(s, dim=-1, descending=True)[:, :2]
+
+        dirs = self.sph2vec(x[:, 3, None, :4])[:, 0]  # ugly ... but ok
+
+        amax = torch.argmax(s, dim=-1)
+        vecs = self.v[amax]
+
+        # check if aligned with direction, else, invert (assumes antipodal symm)
+        dots = torch.bmm(vecs[:, None, :].float(), dirs[..., None].float()).view([bs])  # dot product between vec and dir
+
+        signs = torch.sign(dots)
+        signs[signs == 0] = 1
+        vecs *= signs[..., None].expand(-1, 3)  # also not pretty :)
+
+        y = dirs_to_sph_channels(vecs[:, None])
+        # y = self.sht(s)
+
+        return y[:, None]
+
+
+class Actor__(nn.Module):
     """ Actor module that takes in a state and outputs an action.
     Its policy is the neural network layers
     """
@@ -290,7 +360,7 @@ class Actor(nn.Module):
         # note: why is this required? ...
         self.down = nn.ModuleList(self.down)
 
-    def forward(self, x): # 'stochastic' not implemented/used
+    def forward(self, x):  # 'stochastic' not implemented/used
         x = self.in_(x)
         for l_idx, layer in enumerate(self.down):
             # print(f'l_idx {l_idx}, x.shape {x.shape}, x.device {x.device}')
@@ -740,8 +810,8 @@ class SPHSAC(RLAlgorithm):
 
         # SAC requires a different model for actors and critics
         # Optimizer for actor
-        self.actor_optimizer = torch.optim.Adam(
-            self.policy.actor.parameters(), lr=lr)
+        # self.actor_optimizer = torch.optim.Adam(
+        #     self.policy.actor.parameters(), lr=lr)
 
         # Optimizer for critic
         self.critic_optimizer = torch.optim.Adam(
@@ -834,14 +904,14 @@ class SPHSAC(RLAlgorithm):
             a = self.policy.select_action(np.array(state))
 
             # TODO: this is strange. we need a re-sampling on the sphere here
-            """
+
             action = (
                     a + self.rng.normal(
                 0, self.max_action * self.action_std,
                 size=a.shape)
             ).clip(-self.max_action, self.max_action)
-            """
-            action = a  # TODO: hack to get it to work. remove this.
+
+            # action = a  # TODO: hack to get it to work. remove this.
 
             self.t += action.shape[0]
             # Perform action
@@ -969,9 +1039,9 @@ class SPHSAC(RLAlgorithm):
             actor_loss = -self.policy.critic.Q1(state, currrent_action).mean()
 
             # Optimize the actor
-            self.actor_optimizer.zero_grad()
-            actor_loss.backward()
-            self.actor_optimizer.step()
+            # self.actor_optimizer.zero_grad()
+            # actor_loss.backward()
+            # self.actor_optimizer.step()
 
             # Update the frozen target models
             for param, target_param in zip(

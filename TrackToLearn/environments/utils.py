@@ -92,16 +92,30 @@ def get_sph_channels(
 
     flat_centers = np.concatenate(segments, axis=0)
     centers = torch.as_tensor(flat_centers).to(device)
-    no_centers = centers.shape[0]
+
+    ### dummy hack
+    """
+    lower = torch.as_tensor([0, 0, 0]).to(device)
+    upper = (torch.as_tensor(data_volume.shape[:-1]) - 1).to(device)
+    centers_clipped = torch.min(torch.max(centers, lower), upper)
+    c2 = torch.clone(centers_clipped).long()
+    dummy_first_channel = data_volume[
+        c2[:, 0],
+        c2[:, 1],
+        c2[:, 2]
+        ]
+    """
+    ### end
+
     centers = torch.repeat_interleave(centers, no_neighb, dim=0)
-    coords = centers + neighb_indices.repeat(no_centers, 1)
-    distances = torch.norm(centers - coords.round(), dim=1)  # TODO: check if rounding right here.
+    coords = centers + neighb_indices.repeat(N, 1)
+    distances = torch.norm(centers - coords.long(), dim=1)  # TODO: check if rounding right here.
 
     no_sph_coeff = data_volume.shape[-1]
     ring_radii = torch.repeat_interleave(ring_radii, coords.size()[0])
 
     # try:
-    dist = Normal(ring_radii, 1.)
+    dist = Normal(ring_radii, .2)
     weights = torch.exp(dist.log_prob(distances.repeat(no_channels)))
     # except ValueError:
     #     print('ValueError in distrib')
@@ -113,17 +127,22 @@ def get_sph_channels(
     # trick: set the weights of all clipped points to zero (to prevent double counting)
     weight_mask = torch.all(coords_clipped == coords, dim=1).repeat(no_channels)
     weights = torch.where(weight_mask, weights, 0.)
-    coords_clipped = coords_clipped.round().long()  # TODO: round? should match better to convention...
+    # coords_clipped = coords_clipped.round().long()  # TODO: round? should match better to convention...
+    coords_clipped = coords_clipped.long()
     data = data_volume[coords_clipped[:, 0], coords_clipped[:, 1], coords_clipped[:, 2]]
 
     # scale according to weights
     scaled = data.repeat(no_channels, 1) * weights[:, None]
-
-    scaled = scaled.view(no_neighb, N, no_channels, no_sph_coeff)
+    # scaled = scaled.view(no_neighb, N, no_channels, no_sph_coeff) # !! just wrong
+    scaled = scaled.view(no_channels, N, no_neighb, no_sph_coeff)
 
     # scaled = sort_interleaved(scaled, no_channels, N)
+    coeff_channels = torch.sum(scaled, dim=2)  # sum over all neighbours
+    coeff_channels = coeff_channels.swapaxes(0, 1)  # no_channels <=> N
 
-    coeff_channels = torch.sum(scaled, dim=0)
+    ### dummy hack
+    # coeff_channels[:, 0] = dummy_first_channel
+    ### end
 
     coeff_channels = assemble_channels(coeff_channels, previous_dirs, N, no_channels, no_sph_coeff, device)
 
