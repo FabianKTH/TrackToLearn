@@ -95,7 +95,7 @@ def reward_alignment_with_peaks(
     # Zero NaNs
     u = np.nan_to_num(u)
 
-    # Get do product between all peaks and last streamline segments
+    # Get dot product between all peaks and last streamline segments
     dot = np.einsum('ijk,ik->ij', v, u)
 
     # Get alignment with the most aligned peak

@@ -8,7 +8,7 @@ from nibabel.streamlines import Tractogram
 # from spharmnet.core.models import DirectMaxSPHARMNet
 # spharm-net imports
 from spharmnet.core.layers import ISHT, SHT
-from spharmnet.core.models import Down, Final
+from spharmnet.core.models import Down, Final, FreqConvBlock
 from spharmnet.lib.io import read_mesh
 from spharmnet.lib.sphere import spharm_real, vertex_area
 from torch import nn
@@ -191,7 +191,7 @@ class PadToLmax(nn.Module):
         no_sphin = (l_in + 1)**2
         no_sphout = (l_out + 1)**2
 
-        self.pad = [0, no_sphout - no_sphin + 1]
+        self.pad = [0, no_sphout - no_sphin]
 
     def forward(self, x):
         return nn.functional.pad(x, self.pad, value=0.)
@@ -275,7 +275,7 @@ class Actor__(nn.Module):
         C: int = 8,
         L: int = 6,
         D: int = None,
-        interval: int = 5,
+        interval: int = 1,
         threads: int = 1,
         verbose: bool = False
     ):
@@ -332,7 +332,7 @@ class Actor__(nn.Module):
 
         # first layer: keep L-size but increase channels
         if verbose:
-            print("Down {}\t| C:{} -> {}\t| L:{}".format(0, in_ch, out_ch, L))
+            print("FreqConvBlock {}\t| C:{} -> {}\t| L:{}".format(0, in_ch, out_ch, L))
         self.down.append(Down(Y, Y_inv, area, in_ch, out_ch, L, interval, fullband=True))
 
         # encoding
@@ -407,7 +407,7 @@ class Critic(nn.Module):
             C: int = 8,
             L: int = 6,
             D: int = None,
-            interval: int = 5,
+            interval: int = 1,
             threads: int = 1,
             verbose: bool = False
             ):
@@ -497,6 +497,8 @@ class Critic(nn.Module):
         self.q2_down = nn.ModuleList(self.q2_down)
 
     def forward(self, state, action):
+        assert action.shape[-1] == 4
+
         # isht of state
         # state = self.in_(state)
 
@@ -528,11 +530,10 @@ class Critic(nn.Module):
         return q1, q2
 
     def Q1(self, state, action):
-        # isht of state
-        # state = self.in_(state)
+        assert action.shape[-1] == 4
 
         # pad action
-        # action = self.pad_action(action)
+        action = self.pad_action(action)[:, None, :]
 
         # combine state and action to input
         q1 = torch.cat([state, action], 1)
@@ -1003,11 +1004,15 @@ class SPHSAC(RLAlgorithm):
 
         with torch.no_grad():
             # Select next action according to policy and add clipped noise
+            next_action = self.target.actor(next_state)[:, 0]
+
             noise = (
-                    torch.randn_like(action) * (self.action_std * 2)
+                    torch.randn_like(next_action) * (self.action_std * 2)
             ).clamp(-self.noise_clip, self.noise_clip)
 
-            next_action = torch.squeeze(self.sph2vec(self.target.actor(next_state)))
+            # zero out degree 0 entry in noise (irrelevant)
+            noise[..., 0] = 0.
+
             next_action = (next_action + noise
             ).clamp(-self.max_action, self.max_action)
 
@@ -1019,7 +1024,7 @@ class SPHSAC(RLAlgorithm):
 
         # Get current Q estimates for s
         current_Q1, current_Q2 = self.policy.critic(
-            state, action)
+            state, dirs_to_sph_channels(action[:, None]))
 
         # Compute critic loss Q(s,a) - r + yQ(s',a)
         critic_loss = F.mse_loss(current_Q1, target_Q) + \
@@ -1034,7 +1039,7 @@ class SPHSAC(RLAlgorithm):
         if self.total_it % self.policy_freq == 0:
 
             # Compute actor loss -Q(s,a)
-            currrent_action = self.pad_lmax(self.policy.actor(state))[..., :-1]
+            currrent_action = self.policy.actor(state)[:, 0]
 
             actor_loss = -self.policy.critic.Q1(state, currrent_action).mean()
 
