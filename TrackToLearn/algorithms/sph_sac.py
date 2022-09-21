@@ -197,7 +197,7 @@ class PadToLmax(nn.Module):
         return nn.functional.pad(x, self.pad, value=0.)
 
 
-class Actor(nn.Module):
+class MaxActor(nn.Module):
     """ Dummy actor for testing that only extracts the maximum from the first input channel
 
     """
@@ -377,6 +377,71 @@ class Actor__(nn.Module):
         return x  # None here just to fit outer call structure TODO: fix
 
 
+class Actor(nn.Module):
+
+    def __init__(
+            self,
+            sphere: str,
+            in_ch: int = 4,
+            C: int = 8,
+            L: int = 6,
+            D: int = None,
+            interval: int = 1,
+            threads: int = 1,
+            verbose: bool = False
+            ):
+
+        super().__init__()
+
+        # dummy actor
+        self.max_actor = MaxActor(sphere, in_ch, C, L, D, interval, threads, verbose)
+        self.pad_action = PadToLmax(l_in=1, l_out=L)
+        #
+
+        self.down = []
+        out_ch = C  # Note: this is the running size of one layers output, not the net output
+
+        v, f = read_mesh(sphere)
+        v = v.astype(float)
+        area = vertex_area(v, f)
+        Y = spharm_real(v, L, threads)
+        area = torch.from_numpy(area).to(device=device, dtype=torch.float32)
+        Y = torch.from_numpy(Y).to(device=device, dtype=torch.float32)
+        Y_inv = Y.T
+
+        # first: transform sph harm to spherical signal
+        self.isht = ISHT(Y)
+        self.down.append(Down(Y, Y_inv, area, 1, out_ch, L, interval, fullband=True))
+        self.final = Final(Y, Y_inv, area, out_ch, 1, L, interval)
+
+        # lift signal back into harmonics domain
+        self.sht = SHT(L=1, Y_inv=Y_inv, area=area)
+
+        # lastly: mask 0 entry (irrelevant for direction) and normalize
+        self.out_mask = torch.tensor([0., 1., 1., 1.], requires_grad=False, device=device)
+
+        # sph to direction vector (currently not used.)
+        self.sph2vec = SPH2VEC()
+
+        # note: why is this required? ...
+        self.down = nn.ModuleList(self.down)
+
+    def forward(self, x):
+        x = self.max_actor(x)
+        x = self.pad_action(x)
+        x = self.isht(x)
+
+        for l_idx, layer in enumerate(self.down):
+            # print(f'l_idx {l_idx}, x.shape {x.shape}, x.device {x.device}')
+            x = layer(x)
+        x = self.final(x)
+        x = self.sht(x)
+        x = self.out_mask * x
+        x = F.normalize(x, dim=-1)
+
+        return x
+
+
 class CriticFinal(nn.Module):
     def __init__(self, in_features, out_features):
         super().__init__()
@@ -394,7 +459,7 @@ class CriticFinal(nn.Module):
         return x
 
 
-class Critic(nn.Module):
+class Critic__(nn.Module):
     """ Critic module that takes in a pair of state-action and outputs its
     q-value according to the network's q function. SAC uses two critics
     and takes the lowest value of the two during backprop.
@@ -501,6 +566,121 @@ class Critic(nn.Module):
 
         # isht of state
         # state = self.in_(state)
+
+        # pad action
+        action = self.pad_action(action)[:, None, :]
+
+        # combine state and action to input
+        q1 = torch.cat([state, action], 1)
+        q2 = torch.cat([state, action], 1)
+
+        # isht of the input channels
+        q1 = self.isht(q1)
+        q2 = self.isht(q2)
+
+        # q1
+        for l_idx, layer in enumerate(self.q1_down):
+            # print(f'(q1) l_idx {l_idx}, x.shape {x.shape}, x.device {x.device}')
+            q1 = layer(q1)
+        q1 = self.sth(q1)
+        q1 = self.q1_final(q1)
+
+        # q2
+        for l_idx, layer in enumerate(self.q1_down):
+            # print(f'(q2) l_idx {l_idx}, x.shape {x.shape}, x.device {x.device}')
+            q2 = layer(q2)
+        q2 = self.sth(q2)
+        q2 = self.q2_final(q2)
+
+        return q1, q2
+
+    def Q1(self, state, action):
+        assert action.shape[-1] == 4
+
+        # pad action
+        action = self.pad_action(action)[:, None, :]
+
+        # combine state and action to input
+        q1 = torch.cat([state, action], 1)
+
+        # isth of input
+        q1 = self.isht(q1)
+
+        # q1
+        for l_idx, layer in enumerate(self.q1_down):
+            # print(f'(q1) l_idx {l_idx}, x.shape {x.shape}, x.device {x.device}')
+            q1 = layer(q1)
+        q1 = self.sth(q1)
+        q1 = self.q1_final(q1)
+
+        return q1
+
+
+class Critic(nn.Module):
+
+    def __init__(
+            self,
+            sphere: str,
+            in_ch: int = 5,
+            C: int = 8,
+            L: int = 6,
+            D: int = None,
+            interval: int = 1,
+            threads: int = 1,
+            verbose: bool = False
+            ):
+
+        super().__init__()
+
+        L_in = L
+
+        self.q1_down = []
+        self.q2_down = []
+
+        ch_inc = 2
+
+        in_ch += 1  # account for the additional dimension for the action channel
+        out_ch = C  # Note: this is the running size of one layers output, not the net output
+
+        v, f = read_mesh(sphere)
+        v = v.astype(float)
+        area = vertex_area(v, f)
+        Y = spharm_real(v, L, threads)
+        area = torch.from_numpy(area).to(device=device, dtype=torch.float32)
+        Y = torch.from_numpy(Y).to(device=device, dtype=torch.float32)
+        Y_inv = Y.T
+
+        # first: transform sph harm to spherical signal
+        self.isht = ISHT(Y)
+
+        # pad action (action is expected to be of size 4 for sph vec for l=1)
+        self.pad_action = PadToLmax(l_in=1, l_out=L)
+
+        # encoding
+        L = L_in >> 1  # downsample, L_new = L+old/2
+
+        print("(q1,q2)_down | C:{} -> {}\t| L:{}".format(in_ch, out_ch, L))
+
+        self.q1_down.append(Down(Y, Y_inv, area, in_ch, out_ch, L, interval, fullband=False))
+        self.q2_down.append(Down(Y, Y_inv, area, in_ch, out_ch, L, interval, fullband=False))
+
+        if verbose:
+            print("(q1,q2)_final\t| C:{} -> {}\t| L:{}".format(in_ch, 1, 0))
+
+        # lift signal back into harmonics domain
+        self.sth = SHT(L=L, Y_inv=Y_inv, area=area)
+
+        # self.q1_final = Final(Y, Y_inv, area, in_ch, 1, 0, interval)
+        self.q1_final = CriticFinal(in_ch * (L + 1)**2, 1)
+        # self.q2_final = Final(Y, Y_inv, area, in_ch, 1, 0, interval)
+        self.q2_final = CriticFinal(in_ch * (L + 1)**2, 1)
+
+        # note: why is this required? ...
+        self.q1_down = nn.ModuleList(self.q1_down)
+        self.q2_down = nn.ModuleList(self.q2_down)
+
+    def forward(self, state, action):
+        assert action.shape[-1] == 4
 
         # pad action
         action = self.pad_action(action)[:, None, :]
@@ -811,8 +991,8 @@ class SPHSAC(RLAlgorithm):
 
         # SAC requires a different model for actors and critics
         # Optimizer for actor
-        # self.actor_optimizer = torch.optim.Adam(
-        #     self.policy.actor.parameters(), lr=lr)
+        self.actor_optimizer = torch.optim.Adam(
+            self.policy.actor.parameters(), lr=lr)
 
         # Optimizer for critic
         self.critic_optimizer = torch.optim.Adam(
@@ -1044,9 +1224,9 @@ class SPHSAC(RLAlgorithm):
             actor_loss = -self.policy.critic.Q1(state, currrent_action).mean()
 
             # Optimize the actor
-            # self.actor_optimizer.zero_grad()
-            # actor_loss.backward()
-            # self.actor_optimizer.step()
+            self.actor_optimizer.zero_grad()
+            actor_loss.backward()
+            self.actor_optimizer.step()
 
             # Update the frozen target models
             for param, target_param in zip(
