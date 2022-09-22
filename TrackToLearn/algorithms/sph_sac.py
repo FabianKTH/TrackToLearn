@@ -197,7 +197,7 @@ class PadToLmax(nn.Module):
         return nn.functional.pad(x, self.pad, value=0.)
 
 
-class MaxActor(nn.Module):
+class Actor__(nn.Module):
     """ Dummy actor for testing that only extracts the maximum from the first input channel
 
     """
@@ -263,7 +263,7 @@ class MaxActor(nn.Module):
         return y[:, None]
 
 
-class Actor__(nn.Module):
+class Actor___(nn.Module):
     """ Actor module that takes in a state and outputs an action.
     Its policy is the neural network layers
     """
@@ -394,7 +394,7 @@ class Actor(nn.Module):
         super().__init__()
 
         # dummy actor
-        self.max_actor = MaxActor(sphere, in_ch, C, L, D, interval, threads, verbose)
+        # self.max_actor = MaxActor(sphere, in_ch, C, L, D, interval, threads, verbose)  TODO
         self.pad_action = PadToLmax(l_in=1, l_out=L)
         #
 
@@ -411,7 +411,7 @@ class Actor(nn.Module):
 
         # first: transform sph harm to spherical signal
         self.isht = ISHT(Y)
-        self.down.append(Down(Y, Y_inv, area, 1, out_ch, L, interval, fullband=True))
+        self.down.append(Down(Y, Y_inv, area, in_ch, out_ch, L, interval, fullband=True))
         self.final = Final(Y, Y_inv, area, out_ch, 1, L, interval)
 
         # lift signal back into harmonics domain
@@ -427,8 +427,8 @@ class Actor(nn.Module):
         self.down = nn.ModuleList(self.down)
 
     def forward(self, x):
-        x = self.max_actor(x)
-        x = self.pad_action(x)
+        # x = self.max_actor(x)
+        # x = self.pad_action(x)
         x = self.isht(x)
 
         for l_idx, layer in enumerate(self.down):
@@ -459,7 +459,7 @@ class CriticFinal(nn.Module):
         return x
 
 
-class Critic__(nn.Module):
+class CriticSph(nn.Module):
     """ Critic module that takes in a pair of state-action and outputs its
     q-value according to the network's q function. SAC uses two critics
     and takes the lowest value of the two during backprop.
@@ -616,7 +616,10 @@ class Critic__(nn.Module):
         return q1
 
 
-class Critic(nn.Module):
+class Critic__(nn.Module):
+    """
+    sandbox testing version of the critic
+    """
 
     def __init__(
             self,
@@ -727,6 +730,78 @@ class Critic(nn.Module):
             q1 = layer(q1)
         q1 = self.sth(q1)
         q1 = self.q1_final(q1)
+
+        return q1
+
+
+class Critic(nn.Module):
+    """
+    TD3
+    """
+
+    def __init__(
+            self,
+            sphere: str,
+            in_ch: int = 5,
+            C: int = 8,
+            L: int = 6,
+            D: int = None,
+            interval: int = 1,
+            threads: int = 1,
+            verbose: bool = False
+            ):
+        super(Critic, self).__init__()
+
+        self.pad_action = PadToLmax(l_in=1, l_out=L)
+        self.hidden_layers = 3
+        hidden_dim = 16
+        input_dim = 45  # TODO
+
+        # Q1 architecture
+        self.l1 = nn.Linear(input_dim, hidden_dim)
+        self.l2 = nn.Linear(hidden_dim, hidden_dim)
+        self.l3 = nn.Linear(hidden_dim, 1)
+
+        # Q2 architecture
+        self.l4 = nn.Linear(input_dim, hidden_dim)
+        self.l5 = nn.Linear(hidden_dim, hidden_dim)
+        self.l6 = nn.Linear(hidden_dim, 1)
+
+    def forward(self, state, action) -> torch.Tensor:
+        """ Forward propagation of the actor.
+        Outputs a q estimate from both critics
+        """
+        action = self.pad_action(action)[:, None, :]
+        q1 = torch.cat([state, action], 1)
+        q1 = q1[..., :9]
+        q1 = q1.reshape([-1, 5*9])
+
+        q2 = torch.cat([state, action], 1)
+        q2 = q2[..., :9]
+        q2 = q2.reshape([-1, 5*9])
+
+        q1 = torch.relu(self.l1(q1))
+        q1 = torch.relu(self.l2(q1))
+        q1 = self.l3(q1)
+
+        q2 = torch.relu(self.l4(q2))
+        q2 = torch.relu(self.l5(q2))
+        q2 = self.l6(q2)
+
+        return q1, q2
+
+    def Q1(self, state, action) -> torch.Tensor:
+        """ Forward propagation of the actor.
+        Outputs a q estimate from first critic
+        """
+        action = self.pad_action(action)[:, None, :]
+        q1 = torch.cat([state, action], 1)
+        q1 = q1[..., :9]
+        q1 = q1.reshape([-1, 5*9])
+
+        q1 = torch.relu(self.l1(q1))
+        q1 = torch.relu(self.l2(q1))
+        q1 = self.l3(q1)
 
         return q1
 
@@ -990,7 +1065,7 @@ class SPHSAC(RLAlgorithm):
         self.target = copy.deepcopy(self.policy)
 
         # SAC requires a different model for actors and critics
-        # Optimizer for actor
+        # Optimizer for actor  TODO
         self.actor_optimizer = torch.optim.Adam(
             self.policy.actor.parameters(), lr=lr)
 
@@ -1223,7 +1298,7 @@ class SPHSAC(RLAlgorithm):
 
             actor_loss = -self.policy.critic.Q1(state, currrent_action).mean()
 
-            # Optimize the actor
+            # Optimize the actor TODO
             self.actor_optimizer.zero_grad()
             actor_loss.backward()
             self.actor_optimizer.step()

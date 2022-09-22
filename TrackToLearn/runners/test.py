@@ -10,12 +10,13 @@ from argparse import RawTextHelpFormatter
 from dipy.tracking.metrics import length as slength, winding
 from nibabel.streamlines import Tractogram
 
-from TrackToLearn.algorithms.ddpg import DDPG
-from TrackToLearn.algorithms.ppo import PPO
+# from TrackToLearn.algorithms.ddpg import DDPG
+# from TrackToLearn.algorithms.ppo import PPO
 from TrackToLearn.algorithms.td3 import TD3
 from TrackToLearn.algorithms.sac import SAC
-from TrackToLearn.algorithms.sac_auto import SACAuto
-from TrackToLearn.algorithms.vpg import VPG
+from TrackToLearn.algorithms.sph_sac import SPHSAC
+# from TrackToLearn.algorithms.sac_auto import SACAuto
+# from TrackToLearn.algorithms.vpg import VPG
 from TrackToLearn.datasets.utils import MRIDataVolume
 from TrackToLearn.runners.experiment import (
     add_environment_args,
@@ -75,6 +76,7 @@ class TrackToLearnTest(TrackToLearnExperiment):
         self.max_length = max_length
         self.compute_reward = False
         self.stochastic = stochastic
+        self.gm_seeding = gm_seeding
 
         self.fa_map = None
         if fa_map_file is not None:
@@ -86,20 +88,31 @@ class TrackToLearnTest(TrackToLearnExperiment):
 
         with open(hyperparameters, 'r') as json_file:
             hyperparams = json.load(json_file)
-            self.algorithm = hyperparams['algorithm']
+            self.algorithm = 'SPHSAC'  # hyperparams['algorithm'] TODO: hack
             self.add_neighborhood = hyperparams['add_neighborhood']
             self.random_seed = np.random.randint(1000)
             self.max_angle = hyperparams['max_angle']
-            self.alignment_weighting = hyperparams['alignment_weighting']
-            self.straightness_weighting = hyperparams['straightness_weighting']
-            self.length_weighting = hyperparams['length_weighting']
-            self.target_bonus_factor = hyperparams['target_bonus_factor']
-            self.exclude_penalty_factor = hyperparams['exclude_penalty_factor']
-            self.angle_penalty_factor = hyperparams['angle_penalty_factor']
+            # self.alignment_weighting = hyperparams['alignment_weighting']
+            # self.straightness_weighting = hyperparams['straightness_weighting']
+            # self.length_weighting = hyperparams['length_weighting']
+            # self.target_bonus_factor = hyperparams['target_bonus_factor']
+            # self.exclude_penalty_factor = hyperparams['exclude_penalty_factor']
+            # self.angle_penalty_factor = hyperparams['angle_penalty_factor']
             self.hidden_size = hyperparams['hidden_size']
             self.n_signal = hyperparams['n_signal']
             self.n_dirs = hyperparams['n_dirs']
-            self.gm_seeding = hyperparams['gm_seeding']
+            # self.gm_seeding = hyperparams['gm_seeding']
+
+            # fabi
+            self.sphere = hyperparams['spharmnet_sphere']
+            self.in_ch = hyperparams['spharmnet_in_ch']
+            self.C = hyperparams['spharmnet_C']
+            self.L = hyperparams['spharmnet_L']
+            self.D = hyperparams['spharmnet_D']
+            self.interval = hyperparams['spharmnet_interval']
+            self.threads = hyperparams['spharmnet_threads']
+            self.verbose = hyperparams['spharmnet_verbose']
+
 
         self.comet_experiment = None
         self.remove_invalid_streamlines = remove_invalid_streamlines
@@ -197,17 +210,24 @@ class TrackToLearnTest(TrackToLearnExperiment):
         # Get example state to define NN input size
         example_state = env.reset(0, 1)
         self.input_size = example_state.shape[1]
-
+        """
         algs = {'PPO': PPO,
                 'TD3': TD3,
                 'SAC': SAC,
                 'SACAuto': SACAuto,
                 'DDPG': DDPG,
                 'VPG': VPG}
+        """
+        algs = {
+                'TD3': TD3,
+                'SAC': SAC,
+                'SPHSAC': SPHSAC
+            }
 
         rl_alg = algs[self.algorithm]
 
         # The RL training algorithm
+        """
         alg = rl_alg(
             self.input_size,
             3,
@@ -216,9 +236,21 @@ class TrackToLearnTest(TrackToLearnExperiment):
             gm_seeding=self.gm_seeding,
             rng=self.rng,
             device=device)
+        """
+
+        alg = rl_alg(
+            input_size=self.input_size,
+            sphere=self.sphere,
+            in_ch=self.in_ch,
+            C=self.C,
+            L=self.L,
+            D=self.D,
+            interval=self.interval,
+            threads=self.threads,
+            verbose=self.verbose)
 
         # Load pretrained policies
-        alg.teacher.load(self.policy, 'last_model_state')
+        # alg.teacher.load(self.policy, 'last_model_state')
         alg.policy.load(self.policy, 'last_model_state')
 
         # Run test
@@ -273,6 +305,12 @@ def main(experiment):
 if __name__ == '__main__':
     args = parse_args()
     print(args)
+
+    # fabi hack
+    args.stochastic = False
+    args.gm_seeding = False
+    ##
+
     experiment = TrackToLearnTest(
         # Dataset params
         args.path,
