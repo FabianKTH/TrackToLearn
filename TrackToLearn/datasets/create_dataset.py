@@ -141,11 +141,18 @@ def generate_dataset(
                 'data', data=csf_img.get_fdata())
 
             if interface_file:
-                hdf_interface_volume = hdf_subject.create_group(
-                    'seeding_volume')
+                hdf_interface_volume = hdf_subject.create_group('interface_volume')
+                # hdf_interface_volume = hdf_subject.create_group('seeding_volume')
                 hdf_interface_volume.attrs['vox2rasmm'] = interface_img.affine
                 hdf_interface_volume.create_dataset(
                     'data', data=interface_img.get_fdata())
+
+                # below: hack to get it to work
+                # hdf_interface_volume2 = hdf_subject.create_group(
+                #     'interface_volume')
+                # hdf_interface_volume2.attrs['vox2rasmm'] = interface_img.affine
+                # hdf_interface_volume2.create_dataset(
+                #     'data', data=interface_img.get_fdata())
 
     print("Saved dataset : {}".format(dataset_file))
 

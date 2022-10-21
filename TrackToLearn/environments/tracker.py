@@ -150,6 +150,7 @@ class Tracker(BaseEnv):
         # Initialize rewards and done flags
         self.dones = np.full(self.streamlines.shape[0], False)
 
+        # import ipdb; ipdb.set_trace()
         # Setup input signal
         return self._format_state(self.streamlines[:, :self.length])
 

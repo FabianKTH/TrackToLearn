@@ -399,6 +399,7 @@ class BaseEnv(object):
                 split_set = hdf_file
                 subject = split_id
             else:
+                # import ipdb; ipdb.set_trace()
                 split_set = hdf_file[split_id]
                 subjects = list(split_set.keys())
                 subject = subjects[0]

@@ -3,8 +3,10 @@
 
 set -e  # exit if any command fails
 
-DATASET_FOLDER=
-WORK_DATASET_FOLDER=
+DATASET_FOLDER=/fabi_project/data/ttl_anat_priors
+WORK_DATASET_FOLDER=/fabi_project/data/ttl_anat_priors/fabi_tests
+
+TTL_ROOT=/fabi_project/p3_tract_ttl
 
 mkdir -p $WORK_DATASET_FOLDER
 
@@ -44,7 +46,7 @@ do
 
   DEST_FOLDER="$WORK_EXPERIMENTS_FOLDER"/"$EXPERIMENT"/"$ID"/"$rng_seed"
 
-  python TrackToLearn/runners/sac_auto_train.py \
+  python $TTL_ROOT/TrackToLearn/runners/sac_auto_train.py \
     "$DEST_FOLDER" \
     "$EXPERIMENT" \
     "$ID" \

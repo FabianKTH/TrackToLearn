@@ -209,6 +209,9 @@ class TrackToLearnTest(TrackToLearnExperiment):
 
         # Run test
         tractogram, reward = self.test(alg, env, back_env, save_model=False)
+
+        # import ipdb; ipdb.set_trace()
+
         if self.remove_invalid_streamlines:
             tractogram = self.clean_tractogram(tractogram, env.affine_vox2mask)
 
