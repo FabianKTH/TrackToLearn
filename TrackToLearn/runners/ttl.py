@@ -150,7 +150,8 @@ class TrackToLearnExperiment(Experiment):
                 reference_file=self.reference_file,
                 cmc=self.cmc,
                 asymmetric=self.asymmetric,
-                device=device)
+                device=device,
+                state_formatter=self.state_formatter)
             back_env = None
 
         else:
@@ -180,7 +181,8 @@ class TrackToLearnExperiment(Experiment):
                     self.ground_truth_folder,
                     self.cmc,
                     self.asymmetric,
-                    device)
+                    device,
+                    state_formatter = self.state_formatter)
             else:
                 # Backward environment
                 back_env = Retracker.from_dataset(
@@ -207,7 +209,8 @@ class TrackToLearnExperiment(Experiment):
                     self.ground_truth_folder,
                     self.cmc,
                     self.asymmetric,
-                    device)
+                    device,
+                    self.state_formatter)
 
             # Forward environment
             env = Tracker.from_dataset(
@@ -234,7 +237,8 @@ class TrackToLearnExperiment(Experiment):
                 self.ground_truth_folder,
                 self.cmc,
                 self.asymmetric,
-                device)
+                device,
+                self.state_formatter)
 
         return back_env, env
 
@@ -282,7 +286,9 @@ class TrackToLearnExperiment(Experiment):
                 self.ground_truth_folder,
                 self.cmc,
                 self.asymmetric,
-                device)
+                device,
+                self.state_formatter)
+
             back_env = None
 
         else:
@@ -313,7 +319,8 @@ class TrackToLearnExperiment(Experiment):
                     self.ground_truth_folder,
                     self.cmc,
                     self.asymmetric,
-                    device)
+                    device,
+                    self.state_formatter)
             else:
                 # Backward environment
                 back_env = NoisyRetracker.from_dataset(
@@ -342,7 +349,8 @@ class TrackToLearnExperiment(Experiment):
                     self.ground_truth_folder,
                     self.cmc,
                     self.asymmetric,
-                    device)
+                    device,
+                    self.state_formatter)
 
             # Forward environment
             env = NoisyTracker.from_dataset(
@@ -371,7 +379,8 @@ class TrackToLearnExperiment(Experiment):
                 self.ground_truth_folder,
                 self.cmc,
                 self.asymmetric,
-                device)
+                device,
+                self.state_formatter)
 
         return back_env, env
 
@@ -410,7 +419,8 @@ class TrackToLearnExperiment(Experiment):
                 self.ground_truth_folder,
                 self.cmc,
                 self.asymmetric,
-                device)
+                device,
+                self.state_formatter)
             back_env = None
 
         else:
@@ -446,7 +456,8 @@ class TrackToLearnExperiment(Experiment):
                     self.ground_truth_folder,
                     self.cmc,
                     self.asymmetric,
-                    device)
+                    device,
+                    self.state_formatter)
             else:
                 # Backward environment
                 back_env = NoisyRetracker.from_files(
@@ -480,7 +491,8 @@ class TrackToLearnExperiment(Experiment):
                     ground_truth_folder=self.ground_truth_folder,
                     cmc=self.cmc,
                     asymmetric=self.asymmetric,
-                    device=device)
+                    device=device,
+                    state_formatter=self.state_formatter)
 
             # Forward environment
             env = NoisyTracker.from_files(
@@ -514,7 +526,8 @@ class TrackToLearnExperiment(Experiment):
                 self.ground_truth_folder,
                 self.cmc,
                 self.asymmetric,
-                device)
+                device,
+                self.state_formatter)
 
         return back_env, env
 

@@ -1,18 +1,17 @@
 import copy
+from collections import defaultdict
+from typing import Tuple
+
 import numpy as np
 import torch
 import torch.nn.functional as F
-
-from collections import defaultdict
 from nibabel.streamlines import Tractogram
-from typing import Tuple
 
 from TrackToLearn.algorithms.rl import RLAlgorithm
 from TrackToLearn.algorithms.shared.offpolicy import MaxEntropyActorCritic
 from TrackToLearn.algorithms.shared.replay import OffPolicyReplayBuffer
 from TrackToLearn.algorithms.shared.utils import add_to_means
 from TrackToLearn.environments.env import BaseEnv
-
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -33,18 +32,18 @@ class SAC(RLAlgorithm):
     """
 
     def __init__(
-        self,
-        input_size: int,
-        action_size: int = 3,
-        hidden_dims: str = '',
-        lr: float = 3e-4,
-        gamma: float = 0.99,
-        alpha: float = 0.2,
-        batch_size: int = 2048,
-        interface_seeding: bool = False,
-        rng: np.random.RandomState = None,
-        device: torch.device = "cuda:0",
-    ):
+            self,
+            input_size: int,
+            action_size: int = 3,
+            hidden_dims: str = '',
+            lr: float = 3e-4,
+            gamma: float = 0.99,
+            alpha: float = 0.2,
+            batch_size: int = 2048,
+            interface_seeding: bool = False,
+            rng: np.random.RandomState = None,
+            device: torch.device = "cuda:0",
+            ):
         """
         Parameters
         ----------
@@ -71,23 +70,20 @@ class SAC(RLAlgorithm):
             Should always on GPU
         """
 
-        super(SAC, self).__init__(
-            input_size,
-            action_size,
-            hidden_dims,
-            0.,
-            lr,
-            gamma,
-            batch_size,
-            interface_seeding,
-            rng,
-            device,
-        )
+        super(SAC, self).__init__(input_size,
+                                  action_size,
+                                  0.,
+                                  lr,
+                                  gamma,
+                                  batch_size,
+                                  interface_seeding,
+                                  rng,
+                                  device)
 
         # Initialize main policy
         self.policy = MaxEntropyActorCritic(
             input_size, action_size, hidden_dims,
-        )
+            )
 
         # Initialize target policy to provide baseline
         self.target = copy.deepcopy(self.policy)
@@ -118,10 +114,10 @@ class SAC(RLAlgorithm):
         self.rng = rng
 
     def _episode(
-        self,
-        initial_state: np.ndarray,
-        env: BaseEnv,
-    ) -> Tuple[Tractogram, float, float, float, int]:
+            self,
+            initial_state: np.ndarray,
+            env: BaseEnv,
+            ) -> Tuple[Tractogram, float, float, float, int]:
         """
         Main loop for the algorithm
         From a starting state, run the model until the env. says its done
@@ -206,10 +202,10 @@ class SAC(RLAlgorithm):
             episode_length)
 
     def update(
-        self,
-        replay_buffer: OffPolicyReplayBuffer,
-        batch_size: int = 2**12
-    ) -> Tuple[float, float]:
+            self,
+            replay_buffer: OffPolicyReplayBuffer,
+            batch_size: int = 2 ** 12
+            ) -> Tuple[float, float]:
         """
         TODO: Add motivation behind SAC update ("pessimistic" two-critic
         update, policy that implicitely maximizes the q-function, etc.)
@@ -254,7 +250,7 @@ class SAC(RLAlgorithm):
             target_Q = torch.min(target_Q1, target_Q2)
 
             backup = reward + self.gamma * not_done * \
-                (target_Q - alpha * logp_next_action)
+                     (target_Q - alpha * logp_next_action)
 
         # Get current Q estimates
         current_Q1, current_Q2 = self.policy.critic(
@@ -273,7 +269,7 @@ class SAC(RLAlgorithm):
             'q2': current_Q2.mean().item(),
             'q1_loss': loss_q1.item(),
             'q2_loss': loss_q2.item(),
-        }
+            }
 
         # Optimize the actor
         self.actor_optimizer.zero_grad()
@@ -287,18 +283,18 @@ class SAC(RLAlgorithm):
 
         # Update the frozen target models
         for param, target_param in zip(
-            self.policy.critic.parameters(),
-            self.target.critic.parameters()
-        ):
+                self.policy.critic.parameters(),
+                self.target.critic.parameters()
+                ):
             target_param.data.copy_(
                 self.tau * param.data + (1 - self.tau) * target_param.data)
 
         for param, target_param in zip(
-            self.policy.actor.parameters(),
-            self.target.actor.parameters()
-        ):
+                self.policy.actor.parameters(),
+                self.target.actor.parameters()
+                ):
             target_param.data.copy_(
                 self.tau * param.data + (1 - self.tau) * target_param.data
-            )
+                )
 
         return losses

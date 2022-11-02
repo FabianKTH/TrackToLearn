@@ -26,6 +26,7 @@ from TrackToLearn.environments.utils import (
     is_too_long,
     StoppingFlags)
 
+from TrackToLearn.environments.so3_utils.utils import so3_format_state
 
 class BaseEnv(object):
     """
@@ -62,7 +63,8 @@ class BaseEnv(object):
         ground_truth_folder: str = None,
         cmc: bool = False,
         asymmetric: bool = False,
-        device=None
+        device=None,
+        state_formatter: str='format_state'
     ):
         """
         Parameters
@@ -141,6 +143,7 @@ class BaseEnv(object):
 
         self.rng = rng
         self.device = device
+        self.state_formatter = state_formatter
 
         # TODO: Clean affine stuff
 
@@ -273,7 +276,8 @@ class BaseEnv(object):
         ground_truth_folder: str = None,
         cmc: bool = False,
         asymmetric: bool = False,
-        device=None
+        device=None,
+        state_formatter: str='format_state'
     ):
         (input_volume, tracking_mask, include_mask, exclude_mask, target_mask,
          seeding_mask, peaks) = \
@@ -307,7 +311,8 @@ class BaseEnv(object):
             ground_truth_folder=ground_truth_folder,
             cmc=cmc,
             asymmetric=asymmetric,
-            device=device)
+            device=device,
+            state_formatter=state_formatter)
 
     @classmethod
     def from_files(
@@ -340,7 +345,8 @@ class BaseEnv(object):
         ground_truth_folder: str = None,
         cmc: bool = False,
         asymmetric: bool = False,
-        device=None
+        device=None,
+        state_formatter: str='format_state'
     ):
 
         (input_volume, tracking_mask, include_mask, exclude_mask, target_mask,
@@ -381,7 +387,8 @@ class BaseEnv(object):
             ground_truth_folder,
             cmc,
             asymmetric,
-            device)
+            device,
+            state_formatter)
 
     @classmethod
     def _load_dataset(cls, dataset_file, split_id, interface_seeding=False):
@@ -520,8 +527,10 @@ class BaseEnv(object):
         signal: `numpy.ndarray`
             SH coefficients at the coordinates
         """
+        assert self.state_formatter in globals(), 'Invalid/not imported state formatter'
+        formatter_fun = globals()[self.state_formatter]
 
-        return format_state(
+        return formatter_fun(
             streamlines,
             self.data_volume,
             self.add_neighborhood_vox,
@@ -571,7 +580,7 @@ class BaseEnv(object):
 
         return idx[should_continue], idx[should_stop], flags[should_stop]
 
-    def _is_stopping():
+    def _is_stopping(self):
         """ Check which streamlines should stop or not according to the
         predefined stopping criteria
         """
@@ -594,12 +603,12 @@ class BaseEnv(object):
             self.streamlines[:, :self.length])
         return stopping_idx[(stopping_flags & flag) != 0]
 
-    def reset():
+    def reset(self):
         """ Initialize tracking seeds and streamlines
         """
         pass
 
-    def step():
+    def step(self):
         """
         Apply actions and grow streamlines for one step forward
         Calculate rewards and if the tracking is done, and compute new

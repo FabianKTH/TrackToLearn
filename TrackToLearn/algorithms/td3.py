@@ -1,18 +1,17 @@
 import copy
+from collections import defaultdict
+from typing import Tuple
+
 import numpy as np
 import torch
 import torch.nn.functional as F
-
-from collections import defaultdict
 from nibabel.streamlines import Tractogram
-from typing import Tuple
 
 from TrackToLearn.algorithms.rl import RLAlgorithm
 from TrackToLearn.algorithms.shared.offpolicy import ActorCritic
 from TrackToLearn.algorithms.shared.replay import OffPolicyReplayBuffer
 from TrackToLearn.algorithms.shared.utils import add_to_means
 from TrackToLearn.environments.env import BaseEnv
-
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -73,18 +72,15 @@ class TD3(RLAlgorithm):
             Should always on GPU
         """
 
-        super(TD3, self).__init__(
-            input_size,
-            action_size,
-            hidden_dims,
-            action_std,
-            lr,
-            gamma,
-            batch_size,
-            interface_seeding,
-            rng,
-            device,
-        )
+        super(TD3, self).__init__(input_size,
+                                  action_size,
+                                  action_std,
+                                  lr,
+                                  gamma,
+                                  batch_size,
+                                  interface_seeding,
+                                  rng,
+                                  device)
 
         # Initialize main policy
         self.policy = ActorCritic(

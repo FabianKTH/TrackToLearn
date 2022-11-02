@@ -180,6 +180,11 @@ def add_environment_args(parser):
     parser.add_argument('--asymmetric', action='store_true',
                         help='If set, presume asymmetric fODFs when '
                         'computing reward.')
+    parser.add_argument('--state_formatter', default='format_state', type=str,
+                        action='store',
+                        help='Name of the function (must be imported in env.py)' +
+                        'that formats the state. Options: format_state, so3_format_state')
+
 
 
 def add_model_args(parser):

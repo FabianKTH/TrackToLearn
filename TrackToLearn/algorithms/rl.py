@@ -20,19 +20,16 @@ class RLAlgorithm(object):
     Abstract sample-gathering and training algorithm.
     """
 
-    def __init__(
-        self,
-        input_size: int,
-        action_size: int = 3,
-        hidden_size: int = 256,
-        action_std: float = 0.35,
-        lr: float = 3e-4,
-        gamma: float = 0.99,
-        batch_size: int = 10000,
-        interface_seeding: bool = False,
-        rng: np.random.RandomState = None,
-        device: torch.device = "cuda:0",
-    ):
+    def __init__(self,
+                 input_size: int,
+                 action_size: int = 3,
+                 action_std: float = 0.35,
+                 lr: float = 3e-4,
+                 gamma: float = 0.99,
+                 batch_size: int = 10000,
+                 interface_seeding: bool = False,
+                 rng: np.random.RandomState = None,
+                 device: torch.device = "cuda:0"):
         """
         Parameters
         ----------
@@ -40,8 +37,6 @@ class RLAlgorithm(object):
             Input size for the model
         action_size: int
             Output size for the actor
-        hidden_size: int
-            Width of the NN
         action_std: float
             Starting standard deviation on actions for exploration
         lr: float
@@ -104,6 +99,8 @@ class RLAlgorithm(object):
         while not np.all(done):
             # Select action according to policy + noise to make tracking
             # probabilistic
+            # import ipdb; ipdb.set_trace()
+
             action, h = self.policy.select_action(
                 np.array(state), h)
             # Perform action

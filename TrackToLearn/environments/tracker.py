@@ -113,7 +113,7 @@ class Tracker(BaseEnv):
         # Initialize rewards and done flags
         self.dones = np.full(self.streamlines.shape[0], False)
 
-        # Setup input signal
+        # Setup input signal TODO: load generic state formatter function
         return self._format_state(self.streamlines[:, :self.length])
 
     def reset(self, start: int, end: int) -> np.ndarray:

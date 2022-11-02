@@ -43,7 +43,8 @@ class NoisyTracker(Tracker):
         ground_truth_folder: str = None,
         cmc: bool = False,
         asymmetric: bool = False,
-        device=None
+        device=None,
+        state_formatter: str= 'format_state'
     ):
         """
         Parameters
@@ -129,7 +130,8 @@ class NoisyTracker(Tracker):
             ground_truth_folder,
             cmc,
             asymmetric,
-            device)
+            device,
+            state_formatter)
 
         self.valid_noise = valid_noise
         self.fa_map = None
@@ -165,12 +167,14 @@ class NoisyTracker(Tracker):
         ground_truth_folder: str = None,
         cmc: bool = False,
         asymmetric: bool = False,
-        device=None
+        device=None,
+        state_formatter: str='format_state'
     ):
 
         (input_volume, tracking_mask, include_mask, exclude_mask, target_mask,
          seeding_mask, peaks) = \
-            BaseEnv._load_dataset(dataset_file, 'fibercup', interface_seeding)
+            BaseEnv._load_dataset(dataset_file, 'training', interface_seeding)
+        # BaseEnv._load_dataset(dataset_file, 'fibercup', interface_seeding)
         # BaseEnv._load_dataset(dataset_file, 'fibercup', interface_seeding=False)
         # BaseEnv._load_dataset(dataset_file, 'testing', interface_seeding)  # <- prev. line
 
@@ -204,7 +208,8 @@ class NoisyTracker(Tracker):
             ground_truth_folder,
             cmc,
             asymmetric,
-            device)
+            device,
+            state_formatter)
 
         return instance
 
@@ -241,7 +246,8 @@ class NoisyTracker(Tracker):
         ground_truth_folder: str = None,
         cmc: bool = False,
         asymmetric: bool = False,
-        device=None
+        device=None,
+        state_formatter: str='format_state'
     ):
 
         (input_volume, tracking_mask, include_mask, exclude_mask, target_mask,
@@ -285,7 +291,8 @@ class NoisyTracker(Tracker):
             ground_truth_folder,
             cmc,
             asymmetric,
-            device)
+            device,
+            state_formatter)
 
         return instance
 
@@ -366,7 +373,8 @@ class NoisyRetracker(Retracker):
         ground_truth_folder: str = None,
         cmc: bool = False,
         asymmetric: bool = False,
-        device=None
+        device=None,
+        state_formatter: str='format_state'
     ):
         """
         Parameters
@@ -452,7 +460,8 @@ class NoisyRetracker(Retracker):
             ground_truth_folder,
             cmc,
             asymmetric,
-            device)
+            device,
+            state_formatter)
 
         self.valid_noise = valid_noise
         self.fa_map = None
@@ -488,7 +497,8 @@ class NoisyRetracker(Retracker):
         ground_truth_folder: str = None,
         cmc: bool = False,
         asymmetric: bool = False,
-        device=None
+        device=None,
+        state_formatter: str='format_state'
     ):
 
         (input_volume, tracking_mask, include_mask, exclude_mask, target_mask,
@@ -525,7 +535,8 @@ class NoisyRetracker(Retracker):
             ground_truth_folder,
             cmc,
             asymmetric,
-            device)
+            device,
+            state_formatter)
 
         return instance
 
@@ -562,8 +573,9 @@ class NoisyRetracker(Retracker):
         ground_truth_folder: str = None,
         cmc: bool = False,
         asymmetric: bool = False,
-        device=None
-    ):
+        device=None,
+        state_formatter: str='format_state'
+        ):
 
         (input_volume, tracking_mask, include_mask, exclude_mask, target_mask,
          seeding_mask, peaks) = \
@@ -606,7 +618,8 @@ class NoisyRetracker(Retracker):
             ground_truth_folder,
             cmc,
             asymmetric,
-            device)
+            device,
+            state_formatter)
 
         return instance
 
@@ -687,8 +700,9 @@ class BackwardNoisyTracker(BackwardTracker):
         ground_truth_folder: str = None,
         cmc: bool = False,
         asymmetric: bool = False,
-        device=None
-    ):
+        device=None,
+        state_formatter: str = 'format_state'
+        ):
         """
         Parameters
         ----------
@@ -773,7 +787,8 @@ class BackwardNoisyTracker(BackwardTracker):
             ground_truth_folder,
             cmc,
             asymmetric,
-            device)
+            device,
+            state_formatter)
 
         self.valid_noise = valid_noise
         self.fa_map = None
@@ -809,7 +824,8 @@ class BackwardNoisyTracker(BackwardTracker):
         ground_truth_folder: str = None,
         cmc: bool = False,
         asymmetric: bool = False,
-        device=None
+        device=None,
+        state_formatter:str='format_state'
     ):
 
         (input_volume, tracking_mask, include_mask, exclude_mask, target_mask,
@@ -846,7 +862,8 @@ class BackwardNoisyTracker(BackwardTracker):
             ground_truth_folder,
             cmc,
             asymmetric,
-            device)
+            device,
+            state_formatter)
 
         return instance
 
@@ -883,8 +900,9 @@ class BackwardNoisyTracker(BackwardTracker):
         ground_truth_folder: str = None,
         cmc: bool = False,
         asymmetric: bool = False,
-        device=None
-    ):
+        device=None,
+        state_formatter: str = 'format_state'
+        ):
 
         (input_volume, tracking_mask, include_mask, exclude_mask, target_mask,
          seeding_mask, peaks) = \
@@ -927,7 +945,8 @@ class BackwardNoisyTracker(BackwardTracker):
             ground_truth_folder,
             cmc,
             asymmetric,
-            device)
+            device,
+            state_formatter)
 
         return instance
 
