@@ -265,7 +265,7 @@ class Actor__(nn.Module):
         return y[:, None]
 
 
-class Actor___(nn.Module):
+class Actor__(nn.Module):
     """ Actor module that takes in a state and outputs an action.
     Its policy is the neural network layers
     """
@@ -385,7 +385,7 @@ class Actor(nn.Module):
             self,
             sphere: str,
             in_ch: int = 4,
-            C: int = 8,
+            C: int = 64,
             L: int = 6,
             D: int = None,
             interval: int = 1,
@@ -745,7 +745,7 @@ class Critic(nn.Module):
     def __init__(
             self,
             sphere: str,
-            in_ch: int = 5,
+            in_ch: int = 3,
             C: int = 8,
             L: int = 6,
             D: int = None,
@@ -758,7 +758,8 @@ class Critic(nn.Module):
         self.pad_action = PadToLmax(l_in=1, l_out=L)
         self.hidden_layers = 3
         hidden_dim = 16
-        input_dim = 45  # TODO
+        self.in_ch = in_ch + 1
+        input_dim = self.in_ch * 9  # TODO (why 9??)
 
         # Q1 architecture
         self.l1 = nn.Linear(input_dim, hidden_dim)
@@ -777,11 +778,11 @@ class Critic(nn.Module):
         action = self.pad_action(action)[:, None, :]
         q1 = torch.cat([state, action], 1)
         q1 = q1[..., :9]
-        q1 = q1.reshape([-1, 5*9])
+        q1 = q1.reshape([-1, self.in_ch*9])
 
         q2 = torch.cat([state, action], 1)
         q2 = q2[..., :9]
-        q2 = q2.reshape([-1, 5*9])
+        q2 = q2.reshape([-1, self.in_ch*9])
 
         q1 = torch.relu(self.l1(q1))
         q1 = torch.relu(self.l2(q1))
@@ -800,7 +801,7 @@ class Critic(nn.Module):
         action = self.pad_action(action)[:, None, :]
         q1 = torch.cat([state, action], 1)
         q1 = q1[..., :9]
-        q1 = q1.reshape([-1, 5*9])
+        q1 = q1.reshape([-1, self.in_ch*9])
 
         q1 = torch.relu(self.l1(q1))
         q1 = torch.relu(self.l2(q1))
@@ -1009,7 +1010,8 @@ class SPHSAC(RLAlgorithm):
                  gamma: float = 0.99,
                  batch_size: int = 2048,
                  rng: np.random.RandomState = None,
-                 device: torch.device = "cuda:0"):
+                 device: torch.device = "cuda:0",
+                 interface_seeding:bool = 'False'):
         """
         Parameters
         ----------
@@ -1098,6 +1100,7 @@ class SPHSAC(RLAlgorithm):
         self.pad_lmax = PadToLmax(l_in=1, l_out=L)
 
         self.rng = rng
+        self.interface_seeding = interface_seeding
 
     def _episode(
             self,

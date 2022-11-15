@@ -105,7 +105,15 @@ class TrackToLearnTest(TrackToLearnExperiment):
             self.n_dirs = hyperparams['n_dirs']
             self.interface_seeding = hyperparams['interface_seeding']
             self.no_retrack = hyperparams.get('no_retrack', False)
-            self.state_formatter = hyperparams.get('state_formatter', 'format_state')
+            self.spharmnet_sphere    = hyperparams.get('spharmnet_sphere')
+            self.spharmnet_in_ch     = hyperparams.get('spharmnet_in_ch')
+            self.spharmnet_C         = hyperparams.get('spharmnet_C')
+            self.spharmnet_L         = hyperparams.get('spharmnet_L')
+            self.spharmnet_D         = hyperparams.get('spharmnet_D')
+            self.spharmnet_interval  = hyperparams.get('spharmnet_interval')
+            self.spharmnet_threads   = hyperparams.get('spharmnet_threads')
+            self.spharmnet_verbose   = hyperparams.get('spharmnet_verbose')
+            self.state_formatter     = hyperparams.get('state_formatter')
 
         self.comet_experiment = None
         self.remove_invalid_streamlines = remove_invalid_streamlines
@@ -184,7 +192,6 @@ class TrackToLearnTest(TrackToLearnExperiment):
         # Instanciate environment. Actions will be fed to it and new
         # states will be returned. The environment updates the streamline
         # internally
-
         back_env, env = self.get_test_envs()
 
         # Get example state to define NN input size
@@ -199,18 +206,22 @@ class TrackToLearnTest(TrackToLearnExperiment):
         rl_alg = algs[self.algorithm]
 
         # The RL training algorithm
-        alg = rl_alg(
-            self.input_size,
-            3,
-            self.hidden_dims,
-            self.recurrent,
-            interface_seeding=self.interface_seeding,
-            rng=self.rng,
-            device=device)
+        alg = rl_alg(self.input_size,
+                     self.spharmnet_sphere,
+                     self.spharmnet_in_ch,
+                     self.spharmnet_C,
+                     self.spharmnet_L,
+                     self.spharmnet_D,
+                     self.spharmnet_interval,
+                     self.spharmnet_threads,
+                     self.spharmnet_verbose,
+                     3,
+                     interface_seeding=self.interface_seeding
+                     )
 
         # Load pretrained policies
         alg.policy.load(self.policy, 'last_model_state')
-        import ipdb; ipdb.set_trace()
+
         # Run test
         tractogram, reward = self.test(alg, env, back_env, save_model=False)
 

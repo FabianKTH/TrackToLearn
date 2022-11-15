@@ -128,7 +128,7 @@ class TrackToLearnExperiment(Experiment):
             # Forward environment
             env = InterfaceTracker.from_dataset(
                 self.dataset_file,
-                'training',
+                self.subject_id,
                 interface_seeding=self.interface_seeding,
                 n_signal=self.n_signal,
                 n_dirs=self.n_dirs,
@@ -159,7 +159,7 @@ class TrackToLearnExperiment(Experiment):
                 # Backward environment
                 back_env = BackwardTracker.from_dataset(
                     self.dataset_file,
-                    'training',
+                    self.subject_id,
                     self.interface_seeding,
                     self.n_signal,
                     self.n_dirs,
@@ -187,7 +187,7 @@ class TrackToLearnExperiment(Experiment):
                 # Backward environment
                 back_env = Retracker.from_dataset(
                     self.dataset_file,
-                    'training',
+                    self.subject_id,
                     self.interface_seeding,
                     self.n_signal,
                     self.n_dirs,
@@ -215,7 +215,7 @@ class TrackToLearnExperiment(Experiment):
             # Forward environment
             env = Tracker.from_dataset(
                 self.dataset_file,
-                'training',
+                self.subject_id,
                 self.interface_seeding,
                 self.n_signal,
                 self.n_dirs,

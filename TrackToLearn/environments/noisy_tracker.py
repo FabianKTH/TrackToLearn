@@ -173,7 +173,8 @@ class NoisyTracker(Tracker):
 
         (input_volume, tracking_mask, include_mask, exclude_mask, target_mask,
          seeding_mask, peaks) = \
-            BaseEnv._load_dataset(dataset_file, 'training', interface_seeding)
+            BaseEnv._load_dataset(dataset_file, subject_id, interface_seeding)
+        # BaseEnv._load_dataset(dataset_file, 'training', interface_seeding)
         # BaseEnv._load_dataset(dataset_file, 'fibercup', interface_seeding)
         # BaseEnv._load_dataset(dataset_file, 'fibercup', interface_seeding=False)
         # BaseEnv._load_dataset(dataset_file, 'testing', interface_seeding)  # <- prev. line

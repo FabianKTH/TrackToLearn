@@ -166,7 +166,7 @@ class Reward(object):
 
         # Reward streamlines ending in target mask
         if self.target_bonus_factor > 0.:
-            rewards += self.reward_target(
+            rewards += self.target_bonus_factor * self.reward_target(
                 streamlines,
                 dones)
 
@@ -197,6 +197,10 @@ class Reward(object):
             Array containing the reward
         """
         # Get boolean array of streamlines ending in mask * penalty
+        # print(f'no steps: {streamlines.shape[1]}, any dones:{np.any(dones)}')
+        # if streamlines.shape[1] == 175:
+        #     import ipdb; ipdb.set_trace()
+
         if streamlines.shape[1] >= self.min_nb_steps and np.any(dones):
             sft = StatefulTractogram(streamlines, self.reference, Space.VOX)
             to_score = np.arange(len(sft))[dones]
@@ -206,8 +210,8 @@ class Reward(object):
             reward = np.zeros((streamlines.shape[0]))
             if len(VC) > 0:
                 reward[to_score[VC]] += self.target_bonus_factor
-                self.render(self.peaks, streamlines[to_score[VC]],
-                            reward[to_score[VC]])
+                # line below segfaults
+                # self.render(self.peaks, streamlines[to_score[VC]], reward[to_score[VC]])
             if len(IC) > 0:
                 reward[to_score[IC]] -= self.target_bonus_factor
             if len(NC) > 0:

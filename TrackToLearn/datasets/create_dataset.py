@@ -15,6 +15,13 @@ from TrackToLearn.datasets.processing import min_max_normalize_data_volume
 from TrackToLearn.utils.utils import (
     Timer)
 
+# basis conversion imports
+from dipy.data import get_sphere
+from scilpy.reconst.multi_processes import convert_sh_basis
+import multiprocessing
+
+NO_CPU = multiprocessing.cpu_count()
+
 
 def parse_args():
     """
@@ -48,6 +55,9 @@ def parse_args():
                         help='If set, normalize input-wise signal.')
     parser.add_argument('--save_signal', action='store_true',
                         help='If set, store the resulting signal volume')
+    parser.add_argument('--basis_to_tournier', action='store_true', default=False,
+                        help='Convert fod images from descoteaux basis to tournier')
+
     arguments = parser.parse_args()
 
     return arguments
@@ -69,7 +79,8 @@ def main():
             csf_file=args.csf,
             interface_file=args.interface,
             normalize=args.normalize,
-            save_signal=args.save_signal)
+            save_signal=args.save_signal,
+            convert_basis=args.basis_to_tournier)
 
 
 def generate_dataset(
@@ -84,6 +95,7 @@ def generate_dataset(
     interface_file: str = None,
     normalize: bool = False,
     save_signal: bool = False,
+    convert_basis: bool = False
 ) -> None:
     """ Generate a dataset
     TODO: Docstring
@@ -108,7 +120,7 @@ def generate_dataset(
             image, peaks, wm_img, gm_img, csf_img, interface_img = \
                 process_subject(input_files, peaks_file, subject_id,
                                 normalize, wm_file, gm_file, csf_file,
-                                interface_file)
+                                interface_file, convert_basis)
 
             if save_signal:
                 nib.save(
@@ -165,7 +177,8 @@ def process_subject(
     wm: str = None,
     gm: str = None,
     csf: str = None,
-    interface: str = None
+    interface: str = None,
+    convert_basis: bool = False,
 ) -> Tuple[np.ndarray, List, List, Dict, np.ndarray, np.ndarray]:
 
     affine = nib.load(input_files[0]).affine
@@ -200,6 +213,14 @@ def process_subject(
         input_volume = min_max_normalize_data_volume(input_volumes[0])
     else:
         input_volume = input_volumes[0]
+
+    if convert_basis:
+        input_basis = 'descoteaux07'
+        sphere = get_sphere('repulsion724').subdivide(1)
+        input_volume = convert_sh_basis(input_volume,
+                                    sphere,
+                                    input_basis=input_basis,
+                                    nbr_processes=NO_CPU)
 
     inputs = np.concatenate([input_volume] + input_volumes[1:], axis=-1)
     # Save processed data

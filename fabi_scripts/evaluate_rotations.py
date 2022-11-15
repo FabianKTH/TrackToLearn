@@ -9,6 +9,8 @@ from challenge_scoring.metrics.scoring import score_submission
 from challenge_scoring.utils.attributes import load_attribs
 from challenge_scoring.utils.filenames import mkdir
 
+import pickle
+
 
 def get_rotmat(z_angle):
     res = np.array([[np.cos(z_angle), np.sin(z_angle), 0, 0],
@@ -73,14 +75,16 @@ def main(rootdir, trkfile, reffile, basedir, gtbundl):
             basic_bundles_attribs=bundl_attribs)
         scoredict[t_key] = scores
 
+    pickle.dump(scoredict, open('/fabi_project/data/scratch/NOW/so3_coredict_5deg', 'wb'))
     print('DONE')
 
 
-
-
 if __name__ == '__main__':
-    _rootdir = '/fabi_project/data/ttl_anat_priors/fabi_tests/experiments/SACAutoFiberCupTrain/2022-10-11-10_18_50/1111/test_out2'
-    _trkfile = 'tractogram_SACAutoFiberCupTrain_2022-10-11-10_18_50_fibercup.trk'
+    # _rootdir = '/fabi_project/data/ttl_anat_priors/fabi_tests/experiments/SACAutoFiberCupTrain/2022-10-11-10_18_50/1111/test_out2'
+    # _trkfile = 'tractogram_SACAutoFiberCupTrain_2022-10-11-10_18_50_fibercup.trk'
+    _rootdir = '/fabi_project/data/ttl_anat_priors/fabi_tests/experiments/SACSo3FiberCupTrain/2022-11-09-13_06_33/1111/test_out/'
+    _trkfile = 'tractogram_SACSo3FiberCupTrain_2022-11-09-13_06_33_fibercup.trk'
+
     _reffile = 'fibercup_wm.nii.gz'
     _basedir = '/fabi_project/data/ttl_anat_priors/raw/fibercup/scoring_data'
     _gtbundl = 'gt_bundles_attributes.json'

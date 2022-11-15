@@ -26,7 +26,7 @@ from TrackToLearn.environments.utils import (
     is_too_long,
     StoppingFlags)
 
-from TrackToLearn.environments.so3_utils.utils import so3_format_state
+from TrackToLearn.environments.so3_utils.utils import so3_format_state, so3_test_formatter
 
 class BaseEnv(object):
     """

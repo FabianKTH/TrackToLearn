@@ -3,7 +3,7 @@ import torch
 from torch.distributions.normal import Normal
 
 from TrackToLearn.environments.so3_utils.rotation_utils import dirs_to_sph_channels
-
+from TrackToLearn.environments.utils import torch_trilinear_interpolation
 
 def _antipod_lmax(l_max):
     assert not l_max % 2, f'l_max {l_max} not even!'
@@ -79,6 +79,9 @@ def so3_format_state(
     signal: `numpy.ndarray`
         SH coefficients at the coordinates
     """
+    # first: disregard mask in last dimension
+    data_volume = data_volume[..., :-1]
+
     N, L, P = streamlines.shape
 
     segments = streamlines[:, :-(n_signal + 1):-1, :]
@@ -91,6 +94,8 @@ def so3_format_state(
         dirs = streamlines[:, 1:, :] - streamlines[:, :-1, :]
         previous_dirs[:, :min(dirs.shape[1], n_dirs), :] = \
             dirs[:, :-(n_dirs + 1):-1, :]
+
+    # import ipdb; ipdb.set_trace()
 
     # fabi call
     inputs = get_sph_channels(
@@ -107,8 +112,8 @@ def get_sph_channels(
         segments,
         data_volume,
         previous_dirs,
-        no_channels=3,
-        neighb_cube_dim=5,
+        no_channels=1,
+        neighb_cube_dim=3,
         device=torch.device("cuda")):
     N, H, P = segments.shape
     # t_ = torch.arange(0, neighb_cube_dim)
@@ -140,7 +145,7 @@ def get_sph_channels(
     coords = centers + neighb_indices.repeat(N, 1)
     distances = torch.norm(centers - coords.long(), dim=1)  # TODO: check if rounding right here.
 
-    no_sph_coeff = data_volume.shape[-1]
+    no_sph_coeff = data_volume.shape[-1]  # TODO, should be actually to big by 1 (for mask)
     ring_radii = torch.repeat_interleave(ring_radii, coords.size()[0])
 
     # try:
@@ -175,7 +180,49 @@ def get_sph_channels(
 
     coeff_channels = assemble_channels(coeff_channels, previous_dirs, N, no_channels, no_sph_coeff, device)
 
+    # normalize all spherical functions
+    coeff_channels = torch.nn.functional.normalize(coeff_channels, dim=-1)
+
     return coeff_channels
+
+def so3_test_formatter(
+        streamlines: np.ndarray,
+        data_volume,
+        add_neighborhood_vox,
+        neighborhood_directions,
+        n_signal,
+        n_dirs,
+        device
+        ) -> np.ndarray:
+    N, L, P = streamlines.shape
+
+    if N <= 0:
+        return []
+
+    segments = streamlines[:, -1, :][:, None, :]
+    _, H, _ = segments.shape
+    flat_coords = np.reshape(segments, (N * H, P))
+
+    coords = torch.as_tensor(flat_coords, device=device)
+    n_coords = coords.shape[0]
+
+    # ! drop the mask in the last dim
+    data_volume = data_volume[..., :-1]
+
+    partial_signal = torch_trilinear_interpolation(
+        data_volume,
+        coords).type(torch.float32)
+
+    previous_dirs = np.zeros((N, n_dirs, P), dtype=np.float32)
+    if L > 1:
+        dirs = streamlines[:, 1:, :] - streamlines[:, :-1, :]
+        previous_dirs[:, :min(dirs.shape[1], n_dirs), :] = \
+            dirs[:, :-(n_dirs + 1):-1, :]
+
+    coeff_channels = assemble_channels(partial_signal, previous_dirs, N, no_channels=1,
+                                       no_sph_coeff=data_volume.shape[-1], device=device)
+
+    return coeff_channels.cpu().numpy()
 
 
 def assemble_channels(coeff_channels, previous_dirs, N, no_channels, no_sph_coeff, device):

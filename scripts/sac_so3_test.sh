@@ -12,38 +12,38 @@ mkdir -p $WORK_DATASET_FOLDER
 TEST_SUBJECT_ID=fibercup
 SUBJECT_ID=fibercup
 WORK_EXPERIMENTS_FOLDER=${WORK_DATASET_FOLDER}/experiments
-SCORING_DATA=${DATASET_FOLDER}/raw/${TEST_SUBJECT_ID}/scoring_data
+SCORING_DATA=${DATASET_FOLDER}/raw_tournier_basis/${TEST_SUBJECT_ID}/scoring_data
 
-dataset_file=$WORK_DATASET_FOLDER/raw/${SUBJECT_ID}/${SUBJECT_ID}.hdf5
-test_reference_file=$WORK_DATASET_FOLDER/raw/${TEST_SUBJECT_ID}/masks/${TEST_SUBJECT_ID}_wm.nii.gz
+dataset_file=$WORK_DATASET_FOLDER/raw_tournier_basis/${SUBJECT_ID}/${SUBJECT_ID}.hdf5
+test_reference_file=$WORK_DATASET_FOLDER/raw_tournier_basis/${TEST_SUBJECT_ID}/masks/${TEST_SUBJECT_ID}_wm.nii.gz
 
-EXPERIMENT=SACAutoFiberCupTrain
+EXPERIMENT=SACSo3FiberCupTrain
 
 # source datafiles
-FOD_RAW=$DATASET_FOLDER/raw/${SUBJECT_ID}/fodfs/fibercup_fodf.nii.gz
-WM_RAW=$DATASET_FOLDER/raw/${SUBJECT_ID}/masks/fibercup_wm.nii.gz
-GM_RAW=$DATASET_FOLDER/raw/${SUBJECT_ID}/masks/fibercup_gm.nii.gz
-CSF_RAW=$DATASET_FOLDER/raw/${SUBJECT_ID}/masks/fibercup_csf.nii.gz
-INTERFACE_RAW=$DATASET_FOLDER/raw/${SUBJECT_ID}/maps/interface.nii.gz
+FOD_RAW=$DATASET_FOLDER/raw_tournier_basis/${SUBJECT_ID}/fodfs/fibercup_fodf.nii.gz
+WM_RAW=$DATASET_FOLDER/raw_tournier_basis/${SUBJECT_ID}/masks/fibercup_wm.nii.gz
+GM_RAW=$DATASET_FOLDER/raw_tournier_basis/${SUBJECT_ID}/masks/fibercup_gm.nii.gz
+CSF_RAW=$DATASET_FOLDER/raw_tournier_basis/${SUBJECT_ID}/masks/fibercup_csf.nii.gz
+INTERFACE_RAW=$DATASET_FOLDER/raw_tournier_basis/${SUBJECT_ID}/maps/interface.nii.gz
 
 
 # ID=$(date +"%F-%H_%M_%S")
-ID="2022-10-11-10_18_50"
+ID="2022-11-09-13_06_33"
+# ID="2022-11-07-14_33_28"
 
 seeds=(1111)
 
 for rng_seed in "${seeds[@]}"
 do
-  DEST_FOLDER="$WORK_EXPERIMENTS_FOLDER"/"$EXPERIMENT"/"$ID"/"$rng_seed"/"test_out2"
+  DEST_FOLDER="$WORK_EXPERIMENTS_FOLDER"/"$EXPERIMENT"/"$ID"/"$rng_seed"/"test_out"
   HYPERPARAMS="$WORK_EXPERIMENTS_FOLDER"/"$EXPERIMENT"/"$ID"/"$rng_seed"/"model"/"hyperparameters.json"
   MODEL="$WORK_EXPERIMENTS_FOLDER"/"$EXPERIMENT"/"$ID"/"$rng_seed"/"model"
 
   FOD_TOURNIER=$DEST_FOLDER/fibercup_tournier07_fodf.nii.gz
 
+  mkdir -p $DEST_FOLDER
   # convert basis
   python /opt/conda/bin/scil_convert_sh_basis.py $FOD_RAW $FOD_TOURNIER 'descoteaux07' -f
-
-  mkdir -p $DEST_FOLDER
 
   for angle in $(seq 0 5 360)
   do
@@ -63,7 +63,7 @@ do
   mrtransform -interp nearest -linear $ROTMAT -template $GM_RAW -force $GM_RAW $ANGLEDIR/fibercup_gm.nii.gz
   mrtransform -interp nearest -linear $ROTMAT -template $CSF_RAW -force $CSF_RAW $ANGLEDIR/fibercup_csf.nii.gz
   mrtransform -interp nearest -linear $ROTMAT -template $INTERFACE_RAW -force $INTERFACE_RAW $ANGLEDIR/interface.nii.gz
-  sh2peaks -num 5 -force $ANGLEDIR/fibercup_fodf_tournier.nii.gz $ANGLEDIR/peaks.nii.gz  # was fibercup_fodf.nii.gz before
+  sh2peaks -num 5 -force $ANGLEDIR/fibercup_fodf_tournier.nii.gz $ANGLEDIR/peaks.nii.gz  # was without tournier before
 
   python /fabi_project/p3_tract_ttl/TrackToLearn/datasets/create_dataset.py \
     $ANGLEDIR/fibercup_fodf.nii.gz $ANGLEDIR/fibercup_wm.nii.gz \
@@ -74,9 +74,10 @@ do
     --wm $ANGLEDIR/fibercup_wm.nii.gz \
     --gm $ANGLEDIR/fibercup_gm.nii.gz \
     --csf $ANGLEDIR/fibercup_csf.nii.gz \
-    --interface $ANGLEDIR/interface.nii.gz
+    --interface $ANGLEDIR/interface.nii.gz \
+    --basis_to_tournier
 
-  python $TTL_ROOT/TrackToLearn/runners/test.py \
+  python $TTL_ROOT/TrackToLearn/runners/so3_test.py \
     "$ANGLEDIR" \
     "$EXPERIMENT" \
     "$ID" \
@@ -86,8 +87,8 @@ do
     "$MODEL" \
     "$HYPERPARAMS" \
     --remove_invalid_streamlines \
-    --interface_seeding
-
+    --interface_seeding \
+    --n_seeds_per_voxel 16
 
   done
 
