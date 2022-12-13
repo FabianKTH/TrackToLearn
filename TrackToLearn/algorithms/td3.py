@@ -279,7 +279,7 @@ class TD3(RLAlgorithm):
         # Delayed policy updates
         if self.total_it % self.policy_freq == 0:
             # Compute actor loss -Q(s,a)
-            actor_loss = -self.policy.critic.Q1(
+            actor_loss = -self.policy.critic.get_q1(
                 state, self.policy.act(state)).mean()
 
             losses['actor_loss'] = actor_loss.item()

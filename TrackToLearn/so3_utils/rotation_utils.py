@@ -6,8 +6,10 @@ from scipy.spatial.transform import Rotation
 from pyshtools.shio import SHVectorToCilm, SHCilmToVector
 from pyshtools.rotate import SHRotateRealCoef, djpi2
 from pyshtools.expand import SHExpandDH
+from torch import nn
 
-import TrackToLearn.environments.so3_utils.kernels as kernels
+import TrackToLearn.so3_utils.kernels as kernels
+from TrackToLearn.algorithms.sac_so3 import device
 
 
 # cpy paste from https://github.com/numpy/numpy/issues/5228
@@ -152,3 +154,26 @@ def rotmats_from_dirs(dir_vecs, device=torch.device("cuda")):
     rotmats = torch.eye(3).to(device) + rmats + (rmats @ rmats) * ((1 - c) / (s ** 2)).view([-1, 1, 1])
 
     return rotmats
+
+
+class SPH2VEC(nn.Module):
+    """
+    SPH2VEC
+    reorders sph entries at positions 1-3 and discards first one (constant w.r.t. direction)
+
+    """
+    def __init__(self):
+        super().__init__()
+        self.idxmap = torch.tensor([2, 0, 1], device=device)
+
+    def forward(self, x):
+        idx = self.idxmap.expand(x[..., 1:].shape)
+        v = torch.gather(x[..., 1:], 2, idx)
+
+        return v
+
+    def process_numpy(self, x):
+        x = torch.Tensor(x, device=device)
+        x = self.forward(x)
+
+        return x.cpu().numpy()

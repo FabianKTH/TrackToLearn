@@ -5,8 +5,8 @@ import numpy as np
 import torch
 
 from TrackToLearn.datasets.utils import SubjectData
-from TrackToLearn.environments.so3_utils.utils import (so3_format_state,
-                                                       so3_test_formatter)
+from TrackToLearn.so3_utils.utils import (so3_format_state,
+                                          so3_test_formatter)
 import nibabel as nib
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

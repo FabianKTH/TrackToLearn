@@ -30,20 +30,21 @@ INTERFACE_RAW=$DATASET_FOLDER/raw/${SUBJECT_ID}/maps/interface.nii.gz
 # ID=$(date +"%F-%H_%M_%S")
 ID="2022-10-11-10_18_50"
 
+
 seeds=(1111)
 
 for rng_seed in "${seeds[@]}"
 do
-  DEST_FOLDER="$WORK_EXPERIMENTS_FOLDER"/"$EXPERIMENT"/"$ID"/"$rng_seed"/"test_out2"
+  DEST_FOLDER="$WORK_EXPERIMENTS_FOLDER"/"$EXPERIMENT"/"$ID"/"$rng_seed"/"test_out3"
   HYPERPARAMS="$WORK_EXPERIMENTS_FOLDER"/"$EXPERIMENT"/"$ID"/"$rng_seed"/"model"/"hyperparameters.json"
   MODEL="$WORK_EXPERIMENTS_FOLDER"/"$EXPERIMENT"/"$ID"/"$rng_seed"/"model"
+
+  mkdir -p $DEST_FOLDER
 
   FOD_TOURNIER=$DEST_FOLDER/fibercup_tournier07_fodf.nii.gz
 
   # convert basis
   python /opt/conda/bin/scil_convert_sh_basis.py $FOD_RAW $FOD_TOURNIER 'descoteaux07' -f
-
-  mkdir -p $DEST_FOLDER
 
   for angle in $(seq 0 5 360)
   do
@@ -85,9 +86,10 @@ do
     "$ANGLEDIR"/fibercup_gm.nii.gz \
     "$MODEL" \
     "$HYPERPARAMS" \
-    --remove_invalid_streamlines \
-    --interface_seeding
+    --interface_seeding \
+    --n_seeds_per_voxel 32
 
+    # --remove_invalid_streamlines \
 
   done
 

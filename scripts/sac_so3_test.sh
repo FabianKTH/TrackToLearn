@@ -28,8 +28,9 @@ INTERFACE_RAW=$DATASET_FOLDER/raw_tournier_basis/${SUBJECT_ID}/maps/interface.ni
 
 
 # ID=$(date +"%F-%H_%M_%S")
-ID="2022-11-09-13_06_33"
+# ID="2022-11-09-13_06_33"
 # ID="2022-11-07-14_33_28"
+ID="2022-11-16-15_11_52"
 
 seeds=(1111)
 
@@ -39,13 +40,14 @@ do
   HYPERPARAMS="$WORK_EXPERIMENTS_FOLDER"/"$EXPERIMENT"/"$ID"/"$rng_seed"/"model"/"hyperparameters.json"
   MODEL="$WORK_EXPERIMENTS_FOLDER"/"$EXPERIMENT"/"$ID"/"$rng_seed"/"model"
 
+  mkdir -p $DEST_FOLDER
+
   FOD_TOURNIER=$DEST_FOLDER/fibercup_tournier07_fodf.nii.gz
 
-  mkdir -p $DEST_FOLDER
   # convert basis
   python /opt/conda/bin/scil_convert_sh_basis.py $FOD_RAW $FOD_TOURNIER 'descoteaux07' -f
 
-  for angle in $(seq 0 5 360)
+  for angle in $(seq 325 1 325)  # $(seq 0 5 360)
   do
 
   ANGLEDIR="$DEST_FOLDER"/angle_$angle
@@ -86,9 +88,10 @@ do
     "$ANGLEDIR"/fibercup_gm.nii.gz \
     "$MODEL" \
     "$HYPERPARAMS" \
-    --remove_invalid_streamlines \
     --interface_seeding \
-    --n_seeds_per_voxel 16
+    --n_seeds_per_voxel 32
+
+    # --remove_invalid_streamlines \
 
   done
 

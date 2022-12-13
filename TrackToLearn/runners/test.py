@@ -210,7 +210,7 @@ class TrackToLearnTest(TrackToLearnExperiment):
 
         # Load pretrained policies
         alg.policy.load(self.policy, 'last_model_state')
-        import ipdb; ipdb.set_trace()
+        # import ipdb; ipdb.set_trace()
         # Run test
         tractogram, reward = self.test(alg, env, back_env, save_model=False)
 

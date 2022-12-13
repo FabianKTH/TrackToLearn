@@ -37,7 +37,7 @@ def main(rootdir, trkfile, reffile, basedir, gtbundl):
     for _file in os.listdir(rootdir):
         if _file.startswith('angle_'):
             print(f'loading trackt in folder {_file}')
-            trackts[_file] = load_trk(os.path.join(rootdir, _file, trkfile), 'same')
+            trackts[_file] = load_trk(os.path.join(rootdir, _file, trkfile), 'same', bbox_valid_check=False)
             reffiles[_file] = os.path.join(rootdir, _file, reffile)
             # break  # TODO remove
 
@@ -75,15 +75,18 @@ def main(rootdir, trkfile, reffile, basedir, gtbundl):
             basic_bundles_attribs=bundl_attribs)
         scoredict[t_key] = scores
 
-    pickle.dump(scoredict, open('/fabi_project/data/scratch/NOW/so3_coredict_5deg', 'wb'))
+    pickle.dump(scoredict, open('/fabi_project/data/scratch/NOW/SO3_scoredict', 'wb'))
     print('DONE')
 
 
 if __name__ == '__main__':
-    # _rootdir = '/fabi_project/data/ttl_anat_priors/fabi_tests/experiments/SACAutoFiberCupTrain/2022-10-11-10_18_50/1111/test_out2'
+    _rootdir = '/fabi_project/data/ttl_anat_priors/fabi_tests/experiments/SACSo3FiberCupTrain/2022-11-16-15_11_52/1111/test_out'
+    _trkfile = 'tractogram_SACSo3FiberCupTrain_2022-11-16-15_11_52_fibercup.trk'
+    
+    # _rootdir = '/fabi_project/data/ttl_anat_priors/fabi_tests/experiments/SACAutoFiberCupTrain/2022-10-11-10_18_50/1111/test_out3'
     # _trkfile = 'tractogram_SACAutoFiberCupTrain_2022-10-11-10_18_50_fibercup.trk'
-    _rootdir = '/fabi_project/data/ttl_anat_priors/fabi_tests/experiments/SACSo3FiberCupTrain/2022-11-09-13_06_33/1111/test_out/'
-    _trkfile = 'tractogram_SACSo3FiberCupTrain_2022-11-09-13_06_33_fibercup.trk'
+    # _rootdir = '/fabi_project/data/ttl_anat_priors/fabi_tests/experiments/SACSo3FiberCupTrain/2022-11-09-13_06_33/1111/test_out/'
+    # _trkfile = 'tractogram_SACSo3FiberCupTrain_2022-11-09-13_06_33_fibercup.trk'
 
     _reffile = 'fibercup_wm.nii.gz'
     _basedir = '/fabi_project/data/ttl_anat_priors/raw/fibercup/scoring_data'

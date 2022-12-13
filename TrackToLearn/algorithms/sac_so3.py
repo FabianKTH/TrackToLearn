@@ -1,25 +1,25 @@
 import copy
 from collections import defaultdict
 from os.path import join as pjoin
-from typing import Tuple
+from typing import Any, Dict, Tuple
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 from nibabel.streamlines import Tractogram
-
 # spharm-net imports
 from spharmnet.core.layers import ISHT, SHT
 from spharmnet.core.models import Down, Final
 from spharmnet.lib.io import read_mesh
 from spharmnet.lib.sphere import spharm_real, vertex_area
 from torch import nn
-import torch.nn.functional as F
 
-from TrackToLearn.algorithms.shared.utils import add_to_means
 from TrackToLearn.algorithms.rl import RLAlgorithm
+from TrackToLearn.algorithms.shared.utils import add_to_means
 from TrackToLearn.environments.env import BaseEnv
 # from TrackToLearn.fabi_utils.communication import IbafServer
-from TrackToLearn.environments.so3_utils.rotation_utils import dirs_to_sph_channels
+from TrackToLearn.so3_utils.rotation_utils import SPH2VEC, dirs_to_sph_channels
+from TrackToLearn.so3_utils.utils import PadToLmax
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -32,8 +32,8 @@ class ReplayBuffer:
     """
 
     def __init__(
-        self, state_size: [int, int], action_dim: int, max_size=int(1e6)
-    ):
+            self, state_size: [int, int], action_dim: int, max_size=int(1e6)
+            ):
         """
         Parameters:
         -----------
@@ -60,13 +60,13 @@ class ReplayBuffer:
         self.not_done = np.zeros((self.max_size, 1), dtype=np.float32)
 
     def add(
-        self,
-        state: np.ndarray,
-        action: np.ndarray,
-        next_state: np.ndarray,
-        reward: np.ndarray,
-        done: np.ndarray
-    ):
+            self,
+            state: np.ndarray,
+            action: np.ndarray,
+            next_state: np.ndarray,
+            reward: np.ndarray,
+            done: np.ndarray
+            ):
         """ Add new transitions to buffer in a "ring buffer" way
 
         Parameters:
@@ -98,9 +98,9 @@ class ReplayBuffer:
         self.size = min(self.size + len(ind), self.max_size)
 
     def sample(
-        self,
-        batch_size=1024
-    ) -> Tuple[
+            self,
+            batch_size=1024
+            ) -> Tuple[
         torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor
     ]:
         """ Off-policy sampling. Will sample min(batch_size, self.size)
@@ -159,50 +159,11 @@ class ReplayBuffer:
         pass
 
 
-class SPH2VEC(nn.Module):
-    """
-    SPH2VEC
-    reorders sph entries at positions 1-3 and discards first one (constant w.r.t. direction)
-
-    """
-    def __init__(self):
-        super().__init__()
-        self.idxmap = torch.tensor([2, 0, 1], device=device)
-
-    def forward(self, x):
-        idx = self.idxmap.expand(x[..., 1:].shape)
-        v = torch.gather(x[..., 1:], 2, idx)
-
-        return v
-
-    def process_numpy(self, x):
-        x = torch.Tensor(x, device=device)
-        x = self.forward(x)
-
-        return x.cpu().numpy()
-
-
-class PadToLmax(nn.Module):
-    """
-    PadToLmax
-    appends zeros to last dimesion in order to extend a sph coeff vector up to l_max
-
-    """
-    def __init__(self, l_in = 1, l_out: int = 6):
-        super().__init__()
-        no_sphin = (l_in + 1)**2
-        no_sphout = (l_out + 1)**2
-
-        self.pad = [0, no_sphout - no_sphin]
-
-    def forward(self, x):
-        return nn.functional.pad(x, self.pad, value=0.)
-
-
 class Actor__(nn.Module):
     """ Dummy actor for testing that only extracts the maximum from the first input channel
 
     """
+
     def __init__(
             self,
             sphere: str,
@@ -214,7 +175,6 @@ class Actor__(nn.Module):
             threads: int = 1,
             verbose: bool = False
             ):
-
         super().__init__()
 
         #  spharm boilerplate
@@ -253,7 +213,8 @@ class Actor__(nn.Module):
         vecs = self.v[amax]
 
         # check if aligned with direction, else, invert (assumes antipodal symm)
-        dots = torch.bmm(vecs[:, None, :].float(), dirs[..., None].float()).view([bs])  # dot product between vec and dir
+        dots = torch.bmm(vecs[:, None, :].float(), dirs[..., None].float()).view(
+            [bs])  # dot product between vec and dir
 
         signs = torch.sign(dots)
         signs[signs == 0] = 1
@@ -271,16 +232,16 @@ class Actor__(nn.Module):
     """
 
     def __init__(
-        self,
-        sphere: str,
-        in_ch: int = 4,
-        C: int = 8,
-        L: int = 6,
-        D: int = None,
-        interval: int = 1,
-        threads: int = 1,
-        verbose: bool = False
-    ):
+            self,
+            sphere: str,
+            in_ch: int = 4,
+            C: int = 8,
+            L: int = 6,
+            D: int = None,
+            interval: int = 1,
+            threads: int = 1,
+            verbose: bool = False
+            ):
         """
         DirectMaxSPHARNNet.
         TODO description
@@ -339,7 +300,7 @@ class Actor__(nn.Module):
 
         # encoding
         for i in range(D):
-            L = L_in >> i+1  # downsample, L_new = L+old/2
+            L = L_in >> i + 1  # downsample, L_new = L+old/2
             in_ch = out_ch
             out_ch *= ch_inc
             if verbose:
@@ -357,7 +318,7 @@ class Actor__(nn.Module):
         self.out_mask = torch.tensor([0., 1., 1., 1.], requires_grad=False, device=device)
 
         # sph to direction vector (currently not used.)
-        self.out_dir = SPH2VEC()
+        # self.out_dir = SPH2VEC()
 
         # note: why is this required? ...
         self.down = nn.ModuleList(self.down)
@@ -373,10 +334,9 @@ class Actor__(nn.Module):
         x = F.normalize(x, dim=-1)
         # sph with L=1 to direction
         # x = self.out_dir(x)
-
         # x = torch.squeeze(x)
 
-        return x  # None here just to fit outer call structure TODO: fix
+        return x
 
 
 class Actor(nn.Module):
@@ -423,7 +383,7 @@ class Actor(nn.Module):
         self.out_mask = torch.tensor([0., 1., 1., 1.], requires_grad=False, device=device)
 
         # sph to direction vector (currently not used.)
-        self.sph2vec = SPH2VEC()
+        # self.sph2vec = SPH2VEC()
 
         # note: why is this required? ...
         self.down = nn.ModuleList(self.down)
@@ -455,7 +415,6 @@ class CriticFinal(nn.Module):
         self.layer = nn.Linear(self.in_features, self.out_features)
 
     def forward(self, x):
-
         x = x.view([-1, self.in_features])
         x = self.layer(x)
 
@@ -481,7 +440,6 @@ class CriticSph(nn.Module):
             ):
         """
         DirectMaxSPHARNNet.
-        TODO description
 
         Parameters
         __________
@@ -539,7 +497,7 @@ class CriticSph(nn.Module):
 
         # encoding
         for i in range(D):
-            L = L_in >> i+1  # downsample, L_new = L+old/2
+            L = L_in >> i + 1  # downsample, L_new = L+old/2
 
             if verbose:
                 print("(q1,q2)_down {}\t| C:{} -> {}\t| L:{}".format(i + 1, in_ch, out_ch, L))
@@ -556,9 +514,9 @@ class CriticSph(nn.Module):
         self.sth = SHT(L=L, Y_inv=Y_inv, area=area)
 
         # self.q1_final = Final(Y, Y_inv, area, in_ch, 1, 0, interval)
-        self.q1_final = CriticFinal(in_ch * (L + 1)**2, 1)
+        self.q1_final = CriticFinal(in_ch * (L + 1) ** 2, 1)
         # self.q2_final = Final(Y, Y_inv, area, in_ch, 1, 0, interval)
-        self.q2_final = CriticFinal(in_ch * (L + 1)**2, 1)
+        self.q2_final = CriticFinal(in_ch * (L + 1) ** 2, 1)
 
         # note: why is this required? ...
         self.q1_down = nn.ModuleList(self.q1_down)
@@ -597,7 +555,7 @@ class CriticSph(nn.Module):
 
         return q1, q2
 
-    def Q1(self, state, action):
+    def get_q1(self, state, action):
         assert action.shape[-1] == 4
 
         # pad action
@@ -677,9 +635,9 @@ class Critic__(nn.Module):
         self.sth = SHT(L=L, Y_inv=Y_inv, area=area)
 
         # self.q1_final = Final(Y, Y_inv, area, in_ch, 1, 0, interval)
-        self.q1_final = CriticFinal(in_ch * (L + 1)**2, 1)
+        self.q1_final = CriticFinal(in_ch * (L + 1) ** 2, 1)
         # self.q2_final = Final(Y, Y_inv, area, in_ch, 1, 0, interval)
-        self.q2_final = CriticFinal(in_ch * (L + 1)**2, 1)
+        self.q2_final = CriticFinal(in_ch * (L + 1) ** 2, 1)
 
         # note: why is this required? ...
         self.q1_down = nn.ModuleList(self.q1_down)
@@ -715,7 +673,7 @@ class Critic__(nn.Module):
 
         return q1, q2
 
-    def Q1(self, state, action):
+    def get_q1(self, state, action):
         assert action.shape[-1] == 4
 
         # pad action
@@ -771,18 +729,18 @@ class Critic(nn.Module):
         self.l5 = nn.Linear(hidden_dim, hidden_dim)
         self.l6 = nn.Linear(hidden_dim, 1)
 
-    def forward(self, state, action) -> torch.Tensor:
+    def forward(self, state, action) -> Tuple[torch.Tensor, torch.Tensor]:
         """ Forward propagation of the actor.
         Outputs a q estimate from both critics
         """
         action = self.pad_action(action)[:, None, :]
         q1 = torch.cat([state, action], 1)
         q1 = q1[..., :9]
-        q1 = q1.reshape([-1, self.in_ch*9])
+        q1 = q1.reshape([-1, self.in_ch * 9])
 
         q2 = torch.cat([state, action], 1)
         q2 = q2[..., :9]
-        q2 = q2.reshape([-1, self.in_ch*9])
+        q2 = q2.reshape([-1, self.in_ch * 9])
 
         q1 = torch.relu(self.l1(q1))
         q1 = torch.relu(self.l2(q1))
@@ -794,14 +752,14 @@ class Critic(nn.Module):
 
         return q1, q2
 
-    def Q1(self, state, action) -> torch.Tensor:
+    def get_q1(self, state, action) -> torch.Tensor:
         """ Forward propagation of the actor.
         Outputs a q estimate from first critic
         """
         action = self.pad_action(action)[:, None, :]
         q1 = torch.cat([state, action], 1)
         q1 = q1[..., :9]
-        q1 = q1.reshape([-1, self.in_ch*9])
+        q1 = q1.reshape([-1, self.in_ch * 9])
 
         q1 = torch.relu(self.l1(q1))
         q1 = torch.relu(self.l2(q1))
@@ -819,96 +777,38 @@ class ActorCritic:
     """
 
     def __init__(
-        self,
-        sphere: str,
-        in_ch: int,
-        C: int,
-        L: int,
-        D: int,
-        interval: int,
-        threads: int,
-        verbose: bool,
-    ):
-        """
-        Parameters:
-        -----------
-            state_dim: int
-                Size of input state
-            action_dim: int
-                Size of output action
-            sphere: str
-                Path of a vtk mesh file
-            hidden_dim: int
-                Width of network. Presumes all intermediary
-                layers are of same size for simplicity
-            sphere: str
-                Path of a vtk mesh file
-        """
-        self.actor = Actor(
-            sphere,
-            in_ch,
-            C,
-            L,
-            D,
-            interval,
-            threads,
-            verbose,
-        ).to(device)
+            self,
+            sphere: str,
+            in_ch: int,
+            C: int,
+            L: int,
+            D: int,
+            interval: int,
+            threads: int,
+            verbose: bool,
+            ):
 
-        self.critic = Critic(
-            sphere,
-            in_ch,
-            C,
-            L,
-            D,
-            interval,
-            threads,
-            verbose,
-        ).to(device)
-
+        self.actor = Actor(sphere, in_ch, C, L, D, interval, threads, verbose).to(device)
+        self.critic = Critic(sphere, in_ch, C, L, D, interval, threads, verbose).to(device)
         self.sph2vec = SPH2VEC().to(device)
 
     def act(
-        self,
-        state: torch.Tensor,
-    ) -> (torch.Tensor, torch.Tensor):
-        """ Select action according to actor
+            self,
+            state: torch.Tensor,
+            ) -> (torch.Tensor, torch.Tensor):
 
-        Parameters:
-        -----------
-            state: torch.Tensor
-                Current state of the environment
-
-        Returns:
-        --------
-            action: torch.Tensor
-                Action selected by the policy
-        """
         a = self.actor(state)
 
         # transform sph vec to cartesian direction
         a = self.sph2vec(a)
-
         a = a.view([-1, 3])
-        # a = torch.squeeze(a)
 
         return a
 
-    def select_action(self, state: np.array, stochastic=True) -> np.ndarray:
+    def select_action(self, state: np.array, stochastic=True) -> Tuple[np.ndarray, Any]:
         """ Move state to torch tensor, select action and
         move it back to numpy array
 
-        Parameters:
-        -----------
-            state: np.array
-                State of the environment
-            deterministic: bool
-                Return deterministic action (at test time)
-
-        Returns:
-        --------
-            action: np.array
-                Action selected by the policy
         """
         # if state is not batched, expand it to "batch of 1"
         if len(state.shape) < 2:
@@ -932,19 +832,12 @@ class ActorCritic:
         self.critic.load_state_dict(critic_state_dict)
 
     def state_dict(self):
-        """ Returns state dicts so they can be loaded into another policy
+        """ Returns state dicts, so they can be loaded into another policy
         """
         return self.actor.state_dict(), self.critic.state_dict()
 
     def save(self, path: str, filename: str):
         """ Save policy at specified path and filename
-        Parameters:
-        -----------
-            path: string
-                Path to folder that will contain saved state dicts
-            filename: string
-                Name of saved models. Suffixes for actors and critics
-                will be appended
         """
         torch.save(
             self.critic.state_dict(), pjoin(path, filename + "_critic.pth"))
@@ -953,13 +846,6 @@ class ActorCritic:
 
     def load(self, path: str, filename: str):
         """ Load policy from specified path and filename
-        Parameters:
-        -----------
-            path: string
-                Path to folder containing saved state dicts
-            filename: string
-                Name of saved models. Suffixes for actors and critics
-                will be appended
         """
         self.critic.load_state_dict(
             torch.load(pjoin(path, filename + '_critic.pth')))
@@ -981,16 +867,6 @@ class ActorCritic:
 
 class SPHSAC(RLAlgorithm):
     """
-    The sample-gathering and training algorithm.
-    Based on
-    TODO: Cite
-    Implementation is based on Spinning Up's and rlkit
-
-    See https://github.com/vitchyr/rlkit/blob/master/rlkit/torch/sac/sac.py
-    See https://github.com/openai/spinningup/blob/master/spinup/algos/pytorch/sac/sac.py  # noqa E501
-
-    Some alterations have been made to the algorithms so it could be
-    fitted to the tractography problem.
 
     """
 
@@ -1011,7 +887,7 @@ class SPHSAC(RLAlgorithm):
                  batch_size: int = 2048,
                  rng: np.random.RandomState = None,
                  device: torch.device = "cuda:0",
-                 interface_seeding:bool = 'False'):
+                 interface_seeding: bool = 'False'):
         """
         Parameters
         ----------
@@ -1036,42 +912,22 @@ class SPHSAC(RLAlgorithm):
             Should always on GPU
         """
 
-        super(SPHSAC, self).__init__(input_size, action_size, action_std, lr, gamma, batch_size, rng, device)
+        super(SPHSAC, self).__init__(input_size, action_size, action_std, lr, gamma, batch_size, interface_seeding, rng,
+                                     device)
 
         # Initialize main policy
-        self.policy = ActorCritic(
-            sphere,
-            in_ch,
-            C,
-            L,
-            D,
-            interval,
-            threads,
-            verbose,
-            )
+        self.policy = ActorCritic(sphere, in_ch, C, L, D, interval, threads, verbose)
 
         # Initialize target policy to provide baseline
         self.target = copy.deepcopy(self.policy)
 
         # SAC requires a different model for actors and critics
-        # Optimizer for actor  TODO
         self.actor_optimizer = torch.optim.Adam(
             self.policy.actor.parameters(), lr=lr)
 
         # Optimizer for critic
         self.critic_optimizer = torch.optim.Adam(
             self.policy.critic.parameters(), lr=lr)
-
-        # SAC-specific parameters
-        # self.max_action = 1.
-        # self.on_policy = False
-
-        # self.start_timesteps = 1000
-        # self.total_it = 0
-        # self.policy_freq = 2
-        # self.tau = 0.005
-        # self.noise_clip = 0.5
-        # self.alpha = alpha
 
         # TD3-specific parameters
         self.max_action = 1.
@@ -1085,18 +941,18 @@ class SPHSAC(RLAlgorithm):
 
         # Replay buffer
         self.replay_buffer = ReplayBuffer(
-            [in_ch, (L+1)**2], action_size)
+            [in_ch, (L + 1) ** 2], action_size)
 
         # Fabi spherical cnn parameters
         self.sphere = sphere
-        self.in_ch    = in_ch
-        self.C        = C
-        self.L        = L
-        self.D        = D
+        self.in_ch = in_ch
+        self.C = C
+        self.L = L
+        self.D = D
         self.interval = interval
-        self.threads  = threads
-        self.verbose  = verbose
-        self.sph2vec = SPH2VEC()
+        self.threads = threads
+        self.verbose = verbose
+        # self.sph2vec = SPH2VEC()
         self.pad_lmax = PadToLmax(l_in=1, l_out=L)
 
         self.rng = rng
@@ -1106,7 +962,7 @@ class SPHSAC(RLAlgorithm):
             self,
             initial_state: np.ndarray,
             env: BaseEnv,
-            ) -> Tuple[Tractogram, float, float, float, int]:
+            ) -> Tuple[Any, float, float, float, int]:
         """
         Main loop for the algorithm
         From a starting state, run the model until the env. says its done
@@ -1135,12 +991,12 @@ class SPHSAC(RLAlgorithm):
             Length of episode aka how many transitions were gathered
         """
 
-        running_reward = 0
+        running_reward = 0.
         state = initial_state
-        tractogram = None
+        # tractogram = None
         done = False
-        actor_loss = 0
-        critic_loss = 0
+        # actor_loss = 0
+        # critic_loss = 0
 
         episode_length = 0
 
@@ -1159,51 +1015,28 @@ class SPHSAC(RLAlgorithm):
                 size=a.shape)
             ).clip(-self.max_action, self.max_action)
 
-            # action = a  # TODO: hack to get it to work. remove this.
-
             self.t += action.shape[0]
             # Perform action
-            try:
-                next_state, reward, done, _ = env.step(action)
-            except ValueError:
-                print('jaja, dei mudda')
-
+            next_state, reward, done, _ = env.step(action)
             done_bool = done
 
-            # Store data in replay buffer
-            # WARNING: This is a bit of a trick and I'm not entirely sure this
-            # is legal. This is effectively adding to the replay buffer as if
-            # I had n agents gathering transitions instead of a single one.
-            # This is not mentionned in the TD3 paper. PPO2 does use multiple
-            # learners, though.
-            # I'm keeping it since since it reaaaally speeds up training with
-            # no visible costs
             self.replay_buffer.add(
                 state, action, next_state,
                 reward[..., None], done_bool[..., None])
 
             running_reward += sum(reward)
 
-            # TODO remove this plotting
             # IbafServer.provide_msg({'text': f'running_reward {running_reward}'})
 
             # Train agent after collecting sufficient data
-            # TODO: Add monitors so that losses are properly tracked
             if self.t >= self.start_timesteps:
                 losses = self.update(
                     self.replay_buffer)
-                running_losses = add_to_means(running_losses , losses)
+                running_losses = add_to_means(running_losses, losses)
             # "Harvesting" here means removing "done" trajectories
             # from state as well as removing the associated streamlines
             # This line also set the next_state as the state
             state, h, _ = env.harvest(next_state, h)
-
-            # Add streamlines to the lot
-            # if len(new_tractogram.streamlines) > 0:
-            #     if tractogram is None:
-            #         tractogram = new_tractogram
-            #     else:
-            #         tractogram += new_tractogram
 
             # Keeping track of episode length
             episode_length += 1
@@ -1218,11 +1051,9 @@ class SPHSAC(RLAlgorithm):
     def update(
             self,
             replay_buffer: ReplayBuffer,
-            batch_size: int = 2**7  # was 2**12 before
-            ) -> Tuple[float, float]:
+            batch_size: int = 2 ** 7  # was 2**12 before
+            ) -> Dict[str, float]:  # Tuple[float, float]:
         """
-        TODO: Add motivation behind TD3 update ("pessimistic" two-critic
-        update, policy that implicitely maximizes the q-function, etc.)
 
         Parameters
         ----------
@@ -1249,21 +1080,20 @@ class SPHSAC(RLAlgorithm):
             # Select next action according to policy and add clipped noise
             next_action = self.target.actor(next_state)[:, 0]
 
-            noise = (
-                    torch.randn_like(next_action) * (self.action_std * 2)
-            ).clamp(-self.noise_clip, self.noise_clip)
+            noise = torch.randn_like(next_action) * torch.tensor((self.action_std * 2), device=device)
+            noise = noise.clamp(-self.noise_clip, self.noise_clip)
 
             # zero out degree 0 entry in noise (irrelevant)
             noise[..., 0] = 0.
 
             next_action = (next_action + noise
-            ).clamp(-self.max_action, self.max_action)
+                           ).clamp(-self.max_action, self.max_action)
 
             # Compute the target Q value for s'
             target_Q1, target_Q2 = self.target.critic(
                 next_state, next_action)
             target_Q = torch.min(target_Q1, target_Q2)
-            target_Q = reward + not_done * self.gamma * target_Q
+            target_Q = torch.tensor(reward + not_done * self.gamma * target_Q)
 
         # Get current Q estimates for s
         current_Q1, current_Q2 = self.policy.critic(
@@ -1284,10 +1114,6 @@ class SPHSAC(RLAlgorithm):
             'q2_loss': loss_q2.item(),
             }
 
-        # Compute critic loss Q(s,a) - r + yQ(s',a)
-        # critic_loss = F.mse_loss(current_Q1, target_Q) + \
-        #               F.mse_loss(current_Q2, target_Q)
-
         # Optimize the critic
         self.critic_optimizer.zero_grad()
         critic_loss.backward()
@@ -1299,11 +1125,11 @@ class SPHSAC(RLAlgorithm):
             # Compute actor loss -Q(s,a)
             currrent_action = self.policy.actor(state)[:, 0]
 
-            actor_loss = -self.policy.critic.Q1(state, currrent_action).mean()
+            actor_loss = -self.policy.critic.get_q1(state, currrent_action).mean()
 
             losses['actor_loss'] = actor_loss.item()
 
-            # Optimize the actor TODO
+            # Optimize the actor
             self.actor_optimizer.zero_grad()
             actor_loss.backward()
             self.actor_optimizer.step()

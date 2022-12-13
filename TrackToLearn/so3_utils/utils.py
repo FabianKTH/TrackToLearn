@@ -1,9 +1,11 @@
 import numpy as np
 import torch
+from torch import nn
 from torch.distributions.normal import Normal
 
-from TrackToLearn.environments.so3_utils.rotation_utils import dirs_to_sph_channels
+from TrackToLearn.so3_utils.rotation_utils import dirs_to_sph_channels
 from TrackToLearn.environments.utils import torch_trilinear_interpolation
+
 
 def _antipod_lmax(l_max):
     assert not l_max % 2, f'l_max {l_max} not even!'
@@ -267,3 +269,20 @@ def sort_interleaved(scaled, no_channels, N):
     scaled = torch.stack(torch.split(scaled, N))  # check if no_channels
     return scaled
 
+
+class PadToLmax(nn.Module):
+    """
+    PadToLmax
+    appends zeros to last dimesion in order to extend a sph coeff vector up to l_max
+
+    """
+
+    def __init__(self, l_in=1, l_out: int = 6):
+        super().__init__()
+        no_sphin = (l_in + 1) ** 2
+        no_sphout = (l_out + 1) ** 2
+
+        self.pad = [0, no_sphout - no_sphin]
+
+    def forward(self, x):
+        return nn.functional.pad(x, self.pad, value=0.)

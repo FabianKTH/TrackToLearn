@@ -28,7 +28,7 @@ max_ep=1000 # Chosen empirically
 log_interval=50 # Log at n steps
 lr=0.0005 # Learning rate
 gamma=0.75 # Gamma for reward discounting
-alpha=0.5
+alpha=0.05 # internally sometimes called action_std
 
 valid_noise=0.0 # Noise to add to make a prob output. 0 for deterministic
 

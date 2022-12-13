@@ -26,7 +26,7 @@ from TrackToLearn.environments.utils import (
     is_too_long,
     StoppingFlags)
 
-from TrackToLearn.environments.so3_utils.utils import so3_format_state, so3_test_formatter
+from TrackToLearn.so3_utils.utils import so3_format_state, so3_test_formatter
 
 class BaseEnv(object):
     """
@@ -608,7 +608,7 @@ class BaseEnv(object):
         """
         pass
 
-    def step(self):
+    def step(self, action):
         """
         Apply actions and grow streamlines for one step forward
         Calculate rewards and if the tracking is done, and compute new
