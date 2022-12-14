@@ -26,8 +26,6 @@ from TrackToLearn.environments.utils import (
     is_too_long,
     StoppingFlags)
 
-from TrackToLearn.so3_utils.utils import so3_format_state, so3_test_formatter
-
 class BaseEnv(object):
     """
     Abstract tracking environment.

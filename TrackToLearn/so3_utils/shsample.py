@@ -5,7 +5,7 @@ import torch
 from astropy.coordinates import uniform_spherical_random_surface
 from sklearn.preprocessing import normalize
 
-from scilpy.reconst.sh import order_from_ncoef
+from dipy.reconst.shm import order_from_ncoef
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -93,7 +93,7 @@ class ShBasisSeq:
                     r1 = np.random.uniform()
 
                     if r1 > s:
-                        # if s < .5:
+                        # if s < .7:
                         # np.mean(samples):
                         continue
 
@@ -138,7 +138,13 @@ class ShBasisSeqTorch(ShBasisSeq):
     def spvec_to_prop(sp_vec):
         # ditch negative coefficients
         sp_vec[sp_vec < 0.] = 0.
-        sp_vec /= sp_vec.sum(dim=1, keepdim=True)
+
+        # zero mask for division
+        zero_mask = (sp_vec.sum(dim=1) != 0.)
+        sp_vec[zero_mask] /= sp_vec[zero_mask].sum(dim=1, keepdim=True)
+
+        # set first (isotropic) coeff for all zero vectors to 1.
+        sp_vec[torch.logical_not(zero_mask), 0] = 1.
 
         return sp_vec
 
@@ -147,7 +153,7 @@ class ShBasisSeqTorch(ShBasisSeq):
         no_vecs = len(sph_vecs)
         no_coeff = len(sph_vecs[0])
 
-        assert order_from_ncoef(no_coeff - 1) == self.l_max
+        assert order_from_ncoef(no_coeff, full_basis=True) == self.l_max
 
         prop_n = torch.full(size=(self.n,), fill_value=1./self.n, device=device)
         sph_vecs = self.spvec_to_prop(sph_vecs)

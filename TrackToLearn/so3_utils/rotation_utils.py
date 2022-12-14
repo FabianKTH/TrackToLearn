@@ -1,15 +1,9 @@
 import numpy as np
 import torch
 
-from joblib import Parallel, delayed
-from scipy.spatial.transform import Rotation
 from pyshtools.shio import SHVectorToCilm, SHCilmToVector
 from pyshtools.rotate import SHRotateRealCoef, djpi2
-from pyshtools.expand import SHExpandDH
 from torch import nn
-
-import TrackToLearn.so3_utils.kernels as kernels
-from TrackToLearn.algorithms.sac_so3 import device
 
 
 # cpy paste from https://github.com/numpy/numpy/issues/5228
@@ -31,6 +25,24 @@ def sph2cart(az, el, r):
     return x, y, z
 
 
+def cart2sph_torch(x, y, z):
+    hxy = torch.hypot(x, y)
+    r = torch.hypot(hxy, z)
+    el = torch.arctan2(z, hxy)
+    az = torch.arctan2(y, x)
+
+    return az, el, r
+
+
+def sph2cart_torch(az, el, r):
+    rcos_theta = r * torch.cos(el)
+    x = rcos_theta * torch.cos(az)
+    y = rcos_theta * torch.sin(az)
+    z = r * torch.sin(el)
+
+    return x, y, z
+
+
 def rotate_sph(x, euler_ang, l_max=6):
     x = SHVectorToCilm(x)
     dj = djpi2(l_max)
@@ -41,9 +53,6 @@ def rotate_sph(x, euler_ang, l_max=6):
 
 
 def get_directional_sph(l_max=6, device=torch.device("cuda")):
-    # ker = kernels.von_misses_fisher()
-    # ker = kernels.half_cosine()
-    # sig = SHCilmToVector(SHExpandDH(ker), lmax=l_max)
 
     sig = torch.zeros(4).to(device)
     sig[1] = 1.
@@ -164,7 +173,7 @@ class SPH2VEC(nn.Module):
     """
     def __init__(self):
         super().__init__()
-        self.idxmap = torch.tensor([2, 0, 1], device=device)
+        self.idxmap = torch.tensor([2, 0, 1], device=torch.device("cuda"))
 
     def forward(self, x):
         idx = self.idxmap.expand(x[..., 1:].shape)
@@ -173,7 +182,7 @@ class SPH2VEC(nn.Module):
         return v
 
     def process_numpy(self, x):
-        x = torch.Tensor(x, device=device)
+        x = torch.Tensor(x, device=torch.device("cuda"))
         x = self.forward(x)
 
         return x.cpu().numpy()

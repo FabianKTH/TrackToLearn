@@ -377,7 +377,7 @@ class Actor(nn.Module):
         self.final = Final(Y, Y_inv, area, out_ch, 1, L, interval)
 
         # lift signal back into harmonics domain
-        self.sht = SHT(L=1, Y_inv=Y_inv, area=area)
+        self.sht = SHT(L=1, Y_inv=Y_inv, area=area)  # TODO L=1 ??
 
         # lastly: mask 0 entry (irrelevant for direction) and normalize
         self.out_mask = torch.tensor([0., 1., 1., 1.], requires_grad=False, device=device)
