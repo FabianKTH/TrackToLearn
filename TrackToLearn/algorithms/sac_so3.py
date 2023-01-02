@@ -800,6 +800,10 @@ class ActorCritic:
         a = self.actor(state)
 
         # transform sph vec to cartesian direction
+        # TODO: modular spherical pmf function to direction
+
+
+
         a = self.sph2vec(a)
         a = a.view([-1, 3])
 
