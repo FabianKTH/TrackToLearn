@@ -8,7 +8,7 @@ import torch
 import torch.nn.functional as F
 from nibabel.streamlines import Tractogram
 # spharm-net imports
-from spharmnet.core.layers import ISHT, SHT, SHConv
+from spharmnet.core.layers import ISHT, SHT # SHConv
 from spharmnet.core.models import Down, Final
 from spharmnet.lib.io import read_mesh
 from spharmnet.lib.sphere import spharm_real, vertex_area
@@ -172,7 +172,7 @@ class ReplayBuffer:
         """
         pass
 
-
+"""
 class ConvBlock(nn.Module):
     def __init__(self, Y, Y_inv, area, in_ch, out_ch, L, interval, fullband=True, is_final=False):
         super().__init__()
@@ -201,7 +201,7 @@ class ConvBlock(nn.Module):
         x = self.sht(x)
 
         return x
-
+"""
 
 
 class Actor__(nn.Module):
@@ -406,15 +406,15 @@ class Actor(nn.Module):
 
         Y, Y_inv, area = init_spharm_basis(L, sphere, threads)
         self.isht = ISHT(Y)
-        self.sht = SHT(L=L, Y_inv=Y_inv, area=area)  # TODO L=1 ??
 
         # first: transform sph harm to spherical signal
         # self.isht = ISHT(Y)
         # self.down.append(Down(Y, Y_inv, area, in_ch, out_ch, L, interval, fullband=True))
-        self.down.append(Down(Y, Y_inv, area, in_ch, 32, L, interval, fullband=True))
+        self.down.append(Down(Y, Y_inv, area, in_ch, 32, L, interval, fullband=False))
         # self.down.append(Down(Y, Y_inv, area, 16, 32, L, interval, fullband=False))
         self.final = Final(Y, Y_inv, area, 32, 1, L, interval)
 
+        self.sht = SHT(L=L, Y_inv=Y_inv, area=area)  # TODO L=1 ??
         # lift signal back into harmonics domain
         self.down = nn.ModuleList(self.down)
 
