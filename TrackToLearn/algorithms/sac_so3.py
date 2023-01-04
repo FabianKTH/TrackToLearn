@@ -8,20 +8,34 @@ import torch
 import torch.nn.functional as F
 from nibabel.streamlines import Tractogram
 # spharm-net imports
-from spharmnet.core.layers import ISHT, SHT
+from spharmnet.core.layers import ISHT, SHT, SHConv
 from spharmnet.core.models import Down, Final
 from spharmnet.lib.io import read_mesh
 from spharmnet.lib.sphere import spharm_real, vertex_area
+from torch.optim.lr_scheduler import ExponentialLR
+
 from torch import nn
 
 from TrackToLearn.algorithms.rl import RLAlgorithm
 from TrackToLearn.algorithms.shared.utils import add_to_means
+from TrackToLearn.algorithms.direction_so3 import PropDirGetter, OdfDirGetter
 from TrackToLearn.environments.env import BaseEnv
 # from TrackToLearn.fabi_utils.communication import IbafServer
 from TrackToLearn.so3_utils.rotation_utils import SPH2VEC, dirs_to_sph_channels
-from TrackToLearn.so3_utils.utils import PadToLmax
+from TrackToLearn.so3_utils.utils import PadToLmax, nocoeff_from_l
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
+def init_spharm_basis(L, sphere, threads):
+    v, f = read_mesh(sphere)
+    v = v.astype(float)
+    area = vertex_area(v, f)
+    Y = spharm_real(v, L, threads)
+    area = torch.from_numpy(area).to(device=device, dtype=torch.float32)
+    Y = torch.from_numpy(Y).to(device=device, dtype=torch.float32)
+    Y_inv = Y.T
+    return Y, Y_inv, area
 
 
 class ReplayBuffer:
@@ -157,6 +171,37 @@ class ReplayBuffer:
         """ TODO for imitation learning
         """
         pass
+
+
+class ConvBlock(nn.Module):
+    def __init__(self, Y, Y_inv, area, in_ch, out_ch, L, interval, fullband=True, is_final=False):
+        super().__init__()
+        self.is_final = is_final
+
+        self.shconv = nn.Sequential(
+            SHConv(in_ch, out_ch, L, interval),
+            ISHT(Y),
+        )
+        self.impulse = nn.Conv1d(in_ch, out_ch, kernel_size=1, stride=1, bias=False) if fullband else None
+        self.bn = nn.BatchNorm1d(out_ch, momentum=0.1, affine=True, track_running_stats=False)
+        self.sht = SHT(L, Y_inv, area)
+
+    def forward(self, x):
+        x1 = self.shconv(x)
+        if self.impulse is not None:
+            x2 = self.impulse(x)
+            x = x1 + x2
+        else:
+            x = x1
+        x = self.bn(x)
+
+        if not self.is_final:
+            x = F.relu(x)
+
+        x = self.sht(x)
+
+        return x
+
 
 
 class Actor__(nn.Module):
@@ -345,7 +390,7 @@ class Actor(nn.Module):
             self,
             sphere: str,
             in_ch: int = 4,
-            C: int = 64,
+            C: int = 32,
             L: int = 6,
             D: int = None,
             interval: int = 1,
@@ -355,54 +400,62 @@ class Actor(nn.Module):
 
         super().__init__()
 
-        # dummy actor
-        # self.max_actor = MaxActor(sphere, in_ch, C, L, D, interval, threads, verbose)  TODO
-        self.pad_action = PadToLmax(l_in=1, l_out=L)
-        #
-
+        self.verbose = False # verbose
         self.down = []
         out_ch = C  # Note: this is the running size of one layers output, not the net output
 
-        v, f = read_mesh(sphere)
-        v = v.astype(float)
-        area = vertex_area(v, f)
-        Y = spharm_real(v, L, threads)
-        area = torch.from_numpy(area).to(device=device, dtype=torch.float32)
-        Y = torch.from_numpy(Y).to(device=device, dtype=torch.float32)
-        Y_inv = Y.T
+        Y, Y_inv, area = init_spharm_basis(L, sphere, threads)
+        self.isht = ISHT(Y)
+        self.sht = SHT(L=L, Y_inv=Y_inv, area=area)  # TODO L=1 ??
 
         # first: transform sph harm to spherical signal
-        self.isht = ISHT(Y)
-        self.down.append(Down(Y, Y_inv, area, in_ch, out_ch, L, interval, fullband=True))
-        self.final = Final(Y, Y_inv, area, out_ch, 1, L, interval)
+        # self.isht = ISHT(Y)
+        # self.down.append(Down(Y, Y_inv, area, in_ch, out_ch, L, interval, fullband=True))
+        self.down.append(Down(Y, Y_inv, area, in_ch, 32, L, interval, fullband=True))
+        # self.down.append(Down(Y, Y_inv, area, 16, 32, L, interval, fullband=False))
+        self.final = Final(Y, Y_inv, area, 32, 1, L, interval)
 
         # lift signal back into harmonics domain
-        self.sht = SHT(L=1, Y_inv=Y_inv, area=area)  # TODO L=1 ??
-
-        # lastly: mask 0 entry (irrelevant for direction) and normalize
-        self.out_mask = torch.tensor([0., 1., 1., 1.], requires_grad=False, device=device)
-
-        # sph to direction vector (currently not used.)
-        # self.sph2vec = SPH2VEC()
-
-        # note: why is this required? ...
         self.down = nn.ModuleList(self.down)
 
+
     def forward(self, x):
-        # x = self.max_actor(x)
-        # x = self.pad_action(x)
         x = self.isht(x)
 
         for l_idx, layer in enumerate(self.down):
-            # print(f'l_idx {l_idx}, x.shape {x.shape}, x.device {x.device}')
-            # import ipdb; ipdb.set_trace()
+            if self.verbose:
+                print(f'l_idx {l_idx}, x.shape {x.shape}, x.device {x.device}')
             x = layer(x)
         x = self.final(x)
         x = self.sht(x)
-        x = self.out_mask * x
-        x = F.normalize(x, dim=-1)
+        x = x[:, 0] # [batchsize, 0, no_sh]
 
         return x
+
+
+class SumActor(nn.Module):
+
+    def __init__(self, *args, **kwargs):
+
+        super().__init__()
+        
+        # For debugging and testing only
+        # sums all channels and returns that as action
+
+    def forward(self, x):
+        return x.sum(axis=1)
+
+
+class FirstChannelActor(nn.Module):
+
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+
+        # For debugging and testing only
+        # sums all channels and returns that as action
+
+    def forward(self, x):
+        return x[:, 0]
 
 
 class CriticFinal(nn.Module):
@@ -733,7 +786,8 @@ class Critic(nn.Module):
         """ Forward propagation of the actor.
         Outputs a q estimate from both critics
         """
-        action = self.pad_action(action)[:, None, :]
+        # action = self.pad_action(action)[:, None, :]
+
         q1 = torch.cat([state, action], 1)
         q1 = q1[..., :9]
         q1 = q1.reshape([-1, self.in_ch * 9])
@@ -756,7 +810,7 @@ class Critic(nn.Module):
         """ Forward propagation of the actor.
         Outputs a q estimate from first critic
         """
-        action = self.pad_action(action)[:, None, :]
+        # action = self.pad_action(action)[:, None, :]
         q1 = torch.cat([state, action], 1)
         q1 = q1[..., :9]
         q1 = q1.reshape([-1, self.in_ch * 9])
@@ -788,9 +842,17 @@ class ActorCritic:
             verbose: bool,
             ):
 
+        # self.actor = Actor(sphere, in_ch, C, L, D, interval, threads, verbose).to(device)
         self.actor = Actor(sphere, in_ch, C, L, D, interval, threads, verbose).to(device)
         self.critic = Critic(sphere, in_ch, C, L, D, interval, threads, verbose).to(device)
         self.sph2vec = SPH2VEC().to(device)
+        # how to extract direction
+        sphere_vertices, _ = read_mesh(sphere)
+        self.dirgetter = OdfDirGetter(sphere=sphere_vertices)  # TODO: use same sphere as self.sphere
+
+        Y, Y_inv, area = init_spharm_basis(L, sphere, threads)
+        self.isht = ISHT(Y)
+
 
     def act(
             self,
@@ -799,17 +861,17 @@ class ActorCritic:
 
         a = self.actor(state)
 
+
         # transform sph vec to cartesian direction
         # TODO: modular spherical pmf function to direction
+        # but not here
 
-
-
-        a = self.sph2vec(a)
-        a = a.view([-1, 3])
+        # a = self.sph2vec(a)
+        # a = a.view([-1, 3])
 
         return a
 
-    def select_action(self, state: np.array, stochastic=True) -> Tuple[np.ndarray, Any]:
+    def select_action(self, state: np.array, stochastic=True, return_action=False) -> Tuple[np.ndarray, Any]:
         """ Move state to torch tensor, select action and
         move it back to numpy array
 
@@ -820,8 +882,20 @@ class ActorCritic:
 
         state = torch.as_tensor(state, dtype=torch.float32, device=device)
         action = self.act(state)
+        action_odf = self.isht(action).cpu().data.numpy()
 
-        return action.cpu().data.numpy(), None
+        # Action to direction
+        direction = self.action_to_dir(action_odf)
+
+        if return_action:
+            return direction, action.cpu().data.numpy()
+        else:
+            return direction, None
+
+    def action_to_dir(self, action):
+        direction = self.dirgetter.eval(action.astype(np.double))
+
+        return direction
 
     def parameters(self):
         """ Access parameters for grad clipping
@@ -926,8 +1000,10 @@ class SPHSAC(RLAlgorithm):
         self.target = copy.deepcopy(self.policy)
 
         # SAC requires a different model for actors and critics
+        # TODO
         self.actor_optimizer = torch.optim.Adam(
             self.policy.actor.parameters(), lr=lr)
+        # self.actor_sheduler = ExponentialLR(self.actor_optimizer, gamma=.95)
 
         # Optimizer for critic
         self.critic_optimizer = torch.optim.Adam(
@@ -945,7 +1021,9 @@ class SPHSAC(RLAlgorithm):
 
         # Replay buffer
         self.replay_buffer = ReplayBuffer(
-            [in_ch, (L + 1) ** 2], action_size)
+            state_size=[in_ch, nocoeff_from_l(L)], 
+            action_dim=nocoeff_from_l(L)
+            )
 
         # Fabi spherical cnn parameters
         self.sphere = sphere
@@ -1009,19 +1087,26 @@ class SPHSAC(RLAlgorithm):
         while not np.all(done):
 
             # Select action according to policy + noise for exploration
-            a, h = self.policy.select_action(np.array(state))
+            # a, h = self.policy.select_action(np.array(state))
+            # a, h = self.policy.actor(state).cpu().nunpy(), None
+
+            direction, a = self.policy.select_action(state, return_action=True)
 
             # TODO: this is strange. we need a re-sampling on the sphere here
+            # TODO: re-add noise here.
+            action = a
 
-            action = (
-                    a + self.rng.normal(
+            direction = (
+                    direction + self.rng.normal(
                 0, self.max_action * self.action_std,
-                size=a.shape)
+                size=direction.shape)
             ).clip(-self.max_action, self.max_action)
 
             self.t += action.shape[0]
+            
             # Perform action
-            next_state, reward, done, _ = env.step(action)
+
+            next_state, reward, done, _ = env.step(direction)
             done_bool = done
 
             self.replay_buffer.add(
@@ -1040,7 +1125,7 @@ class SPHSAC(RLAlgorithm):
             # "Harvesting" here means removing "done" trajectories
             # from state as well as removing the associated streamlines
             # This line also set the next_state as the state
-            state, h, _ = env.harvest(next_state, h)
+            state, h, _ = env.harvest(next_state, None)  # h not used here
 
             # Keeping track of episode length
             episode_length += 1
@@ -1082,6 +1167,10 @@ class SPHSAC(RLAlgorithm):
 
         with torch.no_grad():
             # Select next action according to policy and add clipped noise
+            # TODO: add noise again
+            next_action = self.target.actor(next_state)
+
+            """
             next_action = self.target.actor(next_state)[:, 0]
 
             noise = torch.randn_like(next_action) * torch.tensor((self.action_std * 2), device=device)
@@ -1092,16 +1181,17 @@ class SPHSAC(RLAlgorithm):
 
             next_action = (next_action + noise
                            ).clamp(-self.max_action, self.max_action)
+            """
 
             # Compute the target Q value for s'
             target_Q1, target_Q2 = self.target.critic(
-                next_state, next_action)
+                next_state, next_action[:, None])
             target_Q = torch.min(target_Q1, target_Q2)
             target_Q = torch.tensor(reward + not_done * self.gamma * target_Q)
 
         # Get current Q estimates for s
         current_Q1, current_Q2 = self.policy.critic(
-            state, dirs_to_sph_channels(action[:, None]))
+            state, action[:, None])
 
         # MSE loss against Bellman backup
         loss_q1 = F.mse_loss(current_Q1, target_Q.detach()).mean()
@@ -1127,13 +1217,14 @@ class SPHSAC(RLAlgorithm):
         if self.total_it % self.policy_freq == 0:
 
             # Compute actor loss -Q(s,a)
-            currrent_action = self.policy.actor(state)[:, 0]
+            currrent_action = self.policy.actor(state)
 
-            actor_loss = -self.policy.critic.get_q1(state, currrent_action).mean()
+            actor_loss = -self.policy.critic.get_q1(state, currrent_action[:, None]).mean()
 
             losses['actor_loss'] = actor_loss.item()
 
             # Optimize the actor
+            # TODO
             self.actor_optimizer.zero_grad()
             actor_loss.backward()
             self.actor_optimizer.step()

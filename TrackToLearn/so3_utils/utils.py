@@ -7,6 +7,10 @@ from TrackToLearn.so3_utils.rotation_utils import dirs_to_sph_channels
 from TrackToLearn.environments.utils import torch_trilinear_interpolation
 
 
+def nocoeff_from_l(l_max):
+    return (l_max + 1) ** 2
+
+
 def _antipod_lmax(l_max):
     assert not l_max % 2, f'l_max {l_max} not even!'
 

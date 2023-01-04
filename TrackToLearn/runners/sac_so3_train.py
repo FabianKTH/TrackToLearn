@@ -336,8 +336,8 @@ def add_fabi_args(parser):
     parser.add_argument('--spharmnet_L', type=int, default=6,
                         help='Spectral bandwidth that supports individual component learning')
     parser.add_argument('--spharmnet_D', type=int, default=None,
-                        help='Depth of encoding/decoding levels (currently not supported)')
-    parser.add_argument('--spharmnet_interval', type=int, default=5,
+                        help='Depth of encoding/decoding levels (currently not implemented)')
+    parser.add_argument('--spharmnet_interval', type=int, default=1,
                         help='Interval of anchor points')
     parser.add_argument('--spharmnet_threads', type=int, default=1,
                         help='of CPU threads for basis reconstruction. ' + \

@@ -257,6 +257,10 @@ class RLAlgorithm(object):
         running_reward += reward
         running_length += length
 
+        # fabi lr sheduler (here?!)
+        # self.actor_sheduler.step()
+        # print(self.actor_optimizer.param_groups[0]['lr'])
+
         return (
             batch_tractogram,
             running_losses,

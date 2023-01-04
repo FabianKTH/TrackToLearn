@@ -65,11 +65,16 @@ if __name__ == '__main__':
     dimx, dimy, dimz = vol.shape[:-1]
     coords = get_sampling_coords(vol, no_subsampling)
 
+    # go 1 step in uniform direction to test last_direction
+    streamlines = np.concatenate((coords, coords+np.array([1., 0., 0.])), axis=1).astype(np.float32)
+
     # FORMATTER CALL
-    states = so3_format_state(coords, torch.from_numpy(vol).to(device),
+    states = so3_format_state(streamlines, torch.from_numpy(vol).to(device),
                               None, None, n_signal, n_dirs, device)
     # states = so3_test_formatter(coords, torch.from_numpy(vol).to(device),
     #                           None, None, n_signal, n_dirs, device)
+
+    import ipdb; ipdb.set_trace()
 
     for idx in range(states.shape[1]):
         state = states[:, idx]
@@ -79,4 +84,4 @@ if __name__ == '__main__':
         state = state[..., np.r_[0, 4:9, 16:25, 36:49]]
 
         img = nib.Nifti1Image(state, aff)
-        nib.save(img, join(out_folder, f'state-channel_{idx}.nii.gz'))
+        nib.save(img, join(out_folder, f'state2-channel_{idx}.nii.gz'))

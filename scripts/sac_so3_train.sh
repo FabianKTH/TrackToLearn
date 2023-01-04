@@ -25,19 +25,20 @@ test_dataset_file=$WORK_DATASET_FOLDER/raw_tournier_basis/${TEST_SUBJECT_ID}/${T
 test_reference_file=$WORK_DATASET_FOLDER/raw_tournier_basis/${TEST_SUBJECT_ID}/masks/${TEST_SUBJECT_ID}_wm.nii.gz
 
 max_ep=1000 # Chosen empirically
-log_interval=50 # Log at n steps
-lr=0.0005 # Learning rate
+log_interval=10 # (50) Log at n steps
+lr=0.0005 # (0.0005) Learning rate
 gamma=0.75 # Gamma for reward discounting
 alpha=0.05 # internally sometimes called action_std
 
 valid_noise=0.0 # Noise to add to make a prob output. 0 for deterministic
 
-n_seeds_per_voxel=2 # Seed per voxel
+n_seeds_per_voxel=2 # (2) Seed per voxel
 max_angle=30 # Maximum angle for streamline curvature
 
 EXPERIMENT=SACSo3FiberCupTrain
 
-ID=$(date +"%F-%H_%M_%S")
+# ID=$(date +"%F-%H_%M_%S")
+ID="__work_in_progress__"
 
 # seeds=(1111 2222 3333 4444 5555)
 seeds=(1111)
@@ -73,7 +74,7 @@ do
     --spharmnet_sphere=/fabi_project/sphere/ico_low2.vtk \
     --spharmnet_in_ch=2 \
     --spharmnet_interval=1 \
-    --spharmnet_verbose=True \
+    --spharmnet_verbose=False \
     --spharmnet_D=2 \
     --state_formatter="so3_format_state" \
     --target_bonus_factor=10 \

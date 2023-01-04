@@ -2,6 +2,7 @@ import numpy as np
 
 from dipy.direction import DeterministicMaximumDirectionGetter, ClosestPeakDirectionGetter, ProbabilisticDirectionGetter
 from dipy.data import default_sphere
+from dipy.direction import peak_directions, Sphere
 
 
 class BaseDirGetter:
@@ -33,10 +34,38 @@ class PropDirGetter:
 
         for c_idx in range(no_components):
             pos = np.array([0., 0., c_idx])
+            import ipdb; ipdb.set_trace()
             directions[c_idx] = getter.initial_direction(pos)  # assume here: info from direction already encoded in sh sig
                                                                # else: getter.get_direction(pos, dir)
         return directions
-            
+
+
+class OdfDirGetter:
+
+    def __init__(self, sphere):
+        self.sphere = Sphere(xyz=sphere)
+
+    def eval(self, odf_signal):
+
+        no_components = odf_signal.shape[0]
+        directions = np.zeros([no_components, 3])
+
+        for c_idx in range(no_components):
+            dir_, val, idx = peak_directions(odf_signal[c_idx], self.sphere, relative_peak_threshold=.5)
+            # sample with peak values as weights
+
+            # print(f'no peaks: {len(dir_)}')
+
+            if len(dir_) == 0:
+                # no peak found -> sample uniform
+                directions[c_idx] = np.random.uniform(0, 1, 3)
+            else:
+                peak_idx = np.random.choice(dir_.shape[0], p=val / val.sum())
+                # peak_idx = np.random.choice(dir_.shape[0])
+                directions[c_idx] = dir_[peak_idx]
+
+        return directions
+
 
 if __name__ == '__main__':
     _pd = PropDirGetter()
