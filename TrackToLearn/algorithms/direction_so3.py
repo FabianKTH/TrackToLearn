@@ -2,6 +2,7 @@ import numpy as np
 
 from dipy.direction import DeterministicMaximumDirectionGetter, ClosestPeakDirectionGetter, ProbabilisticDirectionGetter
 from dipy.data import default_sphere
+from dipy.reconst.recspeed import local_maxima
 from dipy.direction import peak_directions, Sphere
 
 
@@ -44,6 +45,7 @@ class OdfDirGetter:
 
     def __init__(self, sphere):
         self.sphere = Sphere(xyz=sphere)
+        self.sphere_verts = sphere
 
     def eval(self, odf_signal):
 
@@ -51,11 +53,25 @@ class OdfDirGetter:
         directions = np.zeros([no_components, 3])
 
         for c_idx in range(no_components):
-            dir_, val, idx = peak_directions(odf_signal[c_idx], self.sphere, relative_peak_threshold=.5)
-            # sample with peak values as weights
 
+            # dir_, val, idx = peak_directions(odf_signal[c_idx], self.sphere, relative_peak_threshold=.5)
+            val, idx = local_maxima(odf_signal[c_idx], self.sphere.edges)
+            val[val < 0] = 0.
+            dir_ = self.sphere_verts[idx]
+
+            # sample with peak values as weights
             # print(f'no peaks: {len(dir_)}')
 
+            if len(dir_) == 0:
+                # print('[!] no peak found')
+                # no peak found -> sample uniform
+                directions[c_idx] = np.random.uniform(0, 1, 3)
+            else:
+                # print('[:] using peak')
+                peak_idx = np.argmax(val)
+                directions[c_idx] = dir_[peak_idx]
+
+            """
             if len(dir_) == 0:
                 # no peak found -> sample uniform
                 directions[c_idx] = np.random.uniform(0, 1, 3)
@@ -63,6 +79,7 @@ class OdfDirGetter:
                 peak_idx = np.random.choice(dir_.shape[0], p=val / val.sum())
                 # peak_idx = np.random.choice(dir_.shape[0])
                 directions[c_idx] = dir_[peak_idx]
+            """
 
         return directions
 

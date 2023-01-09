@@ -256,6 +256,10 @@ def assemble_channels(coeff_channels, previous_dirs, N, no_channels, no_sph_coef
     # clear nans (e.g. from first iteration)
     dir_channel = torch.nan_to_num(dir_channel)
 
+    # binarize direction
+    # dir_channel[dir_channel>0] = 1.
+    # dir_channel[dir_channel<0] = 0.
+
     if torch.any(torch.abs(dir_channel) > 1000.):
         print('in err')
 

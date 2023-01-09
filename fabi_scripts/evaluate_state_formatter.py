@@ -74,13 +74,16 @@ if __name__ == '__main__':
     # states = so3_test_formatter(coords, torch.from_numpy(vol).to(device),
     #                           None, None, n_signal, n_dirs, device)
 
-    import ipdb; ipdb.set_trace()
+    # import ipdb; ipdb.set_trace()
 
     for idx in range(states.shape[1]):
         state = states[:, idx]
         state = state.reshape(dimx * no_subsampling - 1,
                               dimy * no_subsampling - 1,
                               dimz * no_subsampling - 1, 49)
+
+        np.save(join(out_folder, f'fullsig-channel_{idx}.npy'), state)
+
         state = state[..., np.r_[0, 4:9, 16:25, 36:49]]
 
         img = nib.Nifti1Image(state, aff)

@@ -209,8 +209,8 @@ class Reward(object):
 
             reward = np.zeros((streamlines.shape[0]))
             if len(VC) > 0:
-                if len(VC) > 10:
-                    import ipdb; ipdb.set_trace()
+                # if len(VC) > 10:
+                #     import ipdb; ipdb.set_trace()
                 reward[to_score[VC]] += self.target_bonus_factor
                 # line below segfaults
                 # self.render(self.peaks, streamlines[to_score[VC]], reward[to_score[VC]])

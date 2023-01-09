@@ -24,15 +24,15 @@ dataset_file=$WORK_DATASET_FOLDER/raw_tournier_basis/${SUBJECT_ID}/${SUBJECT_ID}
 test_dataset_file=$WORK_DATASET_FOLDER/raw_tournier_basis/${TEST_SUBJECT_ID}/${TEST_SUBJECT_ID}.hdf5
 test_reference_file=$WORK_DATASET_FOLDER/raw_tournier_basis/${TEST_SUBJECT_ID}/masks/${TEST_SUBJECT_ID}_wm.nii.gz
 
-max_ep=1000 # Chosen empirically
-log_interval=10 # (50) Log at n steps
+max_ep=10000 # Chosen empirically
+log_interval=25 # (50) Log at n steps
 lr=0.0005 # (0.0005) Learning rate
-gamma=0.75 # Gamma for reward discounting
+gamma=0.75 # (75) Gamma for reward discounting
 alpha=0.05 # internally sometimes called action_std
 
 valid_noise=0.0 # Noise to add to make a prob output. 0 for deterministic
 
-n_seeds_per_voxel=2 # (2) Seed per voxel
+n_seeds_per_voxel=1 # (2) Seed per voxel
 max_angle=30 # Maximum angle for streamline curvature
 
 EXPERIMENT=SACSo3FiberCupTrain
