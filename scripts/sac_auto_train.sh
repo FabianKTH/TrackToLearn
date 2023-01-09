@@ -37,9 +37,11 @@ max_angle=30 # Maximum angle for streamline curvature
 
 EXPERIMENT=SACAutoFiberCupTrain
 
-ID=$(date +"%F-%H_%M_%S")
+# ID=$(date +"%F-%H_%M_%S")
+ID="_debug_log"
 
-seeds=(1111 2222 3333 4444 5555)
+# seeds=(1111 2222 3333 4444 5555)
+seeds=(1111)
 
 for rng_seed in "${seeds[@]}"
 do
