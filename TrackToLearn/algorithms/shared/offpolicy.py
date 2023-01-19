@@ -6,6 +6,8 @@ from os.path import join as pjoin
 from torch import nn
 from torch.distributions.normal import Normal
 
+# fabi
+from TrackToLearn.algorithms.so3_actor import SO3Actor
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -385,8 +387,9 @@ class MaxEntropyActorCritic(ActorCritic):
                 layers are of same size for simplicity
 
         """
-        self.actor = SACActor(
-            state_dim, action_dim, hidden_dims
+        # self.actor = SACActor(
+        self.actor = SO3Actor(
+        state_dim, action_dim, hidden_dims
         ).to(device)
 
         self.critic = Critic(
