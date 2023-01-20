@@ -188,6 +188,8 @@ class SACAuto(SAC):
         critic_loss.backward()
         self.critic_optimizer.step()
 
+        import ipdb; ipdb.set_trace()
+
         # Update the frozen target models
         for param, target_param in zip(
             self.policy.critic.parameters(),

@@ -26,7 +26,7 @@ test_reference_file=$WORK_DATASET_FOLDER/raw/${TEST_SUBJECT_ID}/masks/${TEST_SUB
 
 max_ep=500 # Chosen empirically
 log_interval=50 # Log at n steps
-lr=0.05 # (0.0005) Learning rate
+lr=0.0005 # (0.0005) Learning rate
 gamma=0.75 # Gamma for reward discounting
 alpha=0.5
 

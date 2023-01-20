@@ -8,6 +8,7 @@ from dipy.direction import Sphere
 
 # spharm-net imports
 from spharmnet.core.layers import ISHT, SHT, SHConv
+from spharmnet.core.models import Down, Final
 from spharmnet.lib.io import read_mesh
 from spharmnet.lib.sphere import spharm_real, vertex_area
 
@@ -17,8 +18,8 @@ from TrackToLearn.algorithms.so3_helper import _init_antipod_dict
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-LOG_STD_MAX = 2
-LOG_STD_MIN = -20
+LOG_STD_MAX = -10 # (2)
+LOG_STD_MIN = -20 # (-20)
 
 
 class SO3Actor(nn.Module):
@@ -80,6 +81,8 @@ class SO3Actor(nn.Module):
 
 
     def _init_spharm_conv(self):
+
+        """
         self.in_ch = 2 # 7 + 4 # 1 center + 6 neighbours + 4 prev directions
         self.isht = ISHT(self.B_spha)
         self.sht = SHT(L=self.l_max, Y_inv=self.invB_spha, area=self.area)
@@ -92,6 +95,19 @@ class SO3Actor(nn.Module):
         self.final = ConvBlock(self.B_spha, self.invB_spha, self.area, 16, 2, self.l_max,
                                interval=1, fullband=True, is_final=True)
 
+        self.down = nn.ModuleList(self.down)
+        self.output_activation = nn.Tanh()
+        """
+
+
+        # below, new
+        self.isht = ISHT(self.B_spha)
+        self.sht = SHT(L=self.l_max, Y_inv=self.invB_spha, area=self.area)
+        self.down = []
+        self.down.append(Down(self.B_spha, self.invB_spha, self.area, 2, 32, L=self.l_max,
+                              interval=1, fullband=True))
+        self.final = Final(self.B_spha, self.invB_spha, self.area, 2, 2, L=self.l_max,
+                           interval=1)
         self.down = nn.ModuleList(self.down)
         self.output_activation = nn.Tanh()
 
@@ -108,19 +124,19 @@ class SO3Actor(nn.Module):
         sh_part = sh_part.reshape([-1, 7, 29])
         sh_part = self._remove_mask(sh_part)
         sh_part = self._pad_antipod(sh_part)
-        sh_part = self._change_basis(sh_part, conversion='descoteaux->spharm')
+        # sh_part = self._change_basis(sh_part, conversion='descoteaux->spharm')
+        sh_part = self._sph_to_sp(sh_part, sph_basis='descoteaux')
 
         # dir_part
         dir_part = dir_part.reshape([-1, 4, 3]) # 4 directions, 3 point coefficients
         dir_part = self._dirs_to_shsignal(dir_part, self.l_max)
+        dir_part = self._sph_to_sp(dir_part, sph_basis='spharm')
 
         # concat channels
         out = torch.cat([sh_part, dir_part], 1)
 
-        import ipdb; ipdb.set_trace()
-
         # normalize (TODO: spharm normalization instead of vector norm)
-        out = torch.nn.functional.normalize(out, dim=-1)
+        # out = torch.nn.functional.normalize(out, dim=-1)
 
         return out
 
@@ -209,11 +225,28 @@ class SO3Actor(nn.Module):
             return ValueError
 
 
-    def _get_direction(self, signal):
+    def _sp_to_sph(self, signal, sph_basis='tournier'):
+        if sph_basis == 'tournier':
+            return torch.matmul(signal, self.invB_tour)
+        elif sph_basis == 'descoteaux':
+            return torch.matmul(signal, self.invB_desc)
+        elif sph_basis == 'spharm':
+            return self.sht(signal)
+        else:
+            return ValueError
+
+
+    def _get_direction(self, signal, is_sp_signal=False):
         """
         expects output sh-signals, samples/extracts directions.
         """
-        odf = self.isht(signal)
+
+        # check if signal is already in spherical domain (not spharm)
+        if not is_sp_signal:
+            odf = self.isht(signal)
+        else:
+            odf = signal
+
         peak_idx = torch.argmax(odf, dim=-1)
 
         peak_dir = self.v[peak_idx]
@@ -253,6 +286,24 @@ class SO3Actor(nn.Module):
         return x
 
 
+    def _so3_conv_net2(self, signal, test=False):
+        x = signal
+
+        if test:
+            dir_mask = (x[:, -1, None] > -.05).int()
+            x = x[:, 0, None] * dir_mask
+            # x = self.sht(x)
+            x = torch.cat([x, x], 1)
+
+        else:
+            x = torch.cat([x[:, 0, None], x[:, -1, None]], 1) # extract only first and last
+            # for l_idx, layer in enumerate(self.down):
+            #     x = layer(x)
+            x = self.final(x)
+
+        return x
+
+
     def forward(
         self,
         state: torch.Tensor,
@@ -270,8 +321,8 @@ class SO3Actor(nn.Module):
         # stochastic=False
         # state = self._change_basis(state, 'tournier->spharm') # should be descoteaux->spharm
 
-        p = self._so3_conv_net(state)
-        p = self._get_direction(p)
+        p = self._so3_conv_net2(state, test=False)
+        p = self._get_direction(p, is_sp_signal=True)
 
         mu = p[:, 0]
         log_std = p[:, 1]
