@@ -34,19 +34,22 @@ class SO3Actor(nn.Module):
 
         self.l_max = 6
         self._antipod_dict = _init_antipod_dict(l_max=self.l_max)
-        self.antipod_idx = self._tt(self._antipod_dict[self.l_max])
+        self.antipod_idx = self._tt(np.array(self._antipod_dict[self.l_max]),
+                                    dtype=torch.int64)
+
+        self.callcount = 0 # TODO remove, this is really dirty
 
         self._init_spharm_basis() # inits self.Y, self.Y_inv, self.area
         self._init_spharm_conv() # inits self.isht, self.sht
 
 
     @staticmethod
-    def _tt(x):
+    def _tt(x, dtype=torch.float32):
         """
         tt: to torch, shorthand for converting numpy to torch
         """
 
-        return torch.from_numpy(x).to(device=device, dtype=torch.float32)
+        return torch.from_numpy(x).to(device=device, dtype=dtype)
 
     def _init_spharm_basis(self):
         sphere_dir = '/fabi_project/sphere/ico4.vtk' # TODO: dont code so hard (ico_low2.vtk)
@@ -77,16 +80,16 @@ class SO3Actor(nn.Module):
 
 
     def _init_spharm_conv(self):
-        self.in_ch = 7 + 4 # 1 center + 6 neighbours + 4 prev directions
+        self.in_ch = 2 # 7 + 4 # 1 center + 6 neighbours + 4 prev directions
         self.isht = ISHT(self.B_spha)
         self.sht = SHT(L=self.l_max, Y_inv=self.invB_spha, area=self.area)
         
         self.down = []
-        self.down.append(ConvBlock(self.B_spha, self.invB_spha, self.area, self.in_ch, 32,
+        self.down.append(ConvBlock(self.B_spha, self.invB_spha, self.area, self.in_ch, 16,
                                    self.l_max, interval=1, fullband=False, is_final=False))
 
         # note, 2 output channels, one for mu, one for log_std
-        self.final = ConvBlock(self.B_spha, self.invB_spha, self.area, 32, 2, self.l_max,
+        self.final = ConvBlock(self.B_spha, self.invB_spha, self.area, 16, 2, self.l_max,
                                interval=1, fullband=True, is_final=True)
 
         self.down = nn.ModuleList(self.down)
@@ -105,14 +108,21 @@ class SO3Actor(nn.Module):
         sh_part = sh_part.reshape([-1, 7, 29])
         sh_part = self._remove_mask(sh_part)
         sh_part = self._pad_antipod(sh_part)
-        sh_part = self._change_basis(sh_part.float(), conversion='descoteaux->spharm')
+        sh_part = self._change_basis(sh_part, conversion='descoteaux->spharm')
 
         # dir_part
         dir_part = dir_part.reshape([-1, 4, 3]) # 4 directions, 3 point coefficients
         dir_part = self._dirs_to_shsignal(dir_part, self.l_max)
 
         # concat channels
-        return torch.cat([sh_part, dir_part], 1)
+        out = torch.cat([sh_part, dir_part], 1)
+
+        import ipdb; ipdb.set_trace()
+
+        # normalize (TODO: spharm normalization instead of vector norm)
+        out = torch.nn.functional.normalize(out, dim=-1)
+
+        return out
 
 
     @staticmethod
@@ -172,13 +182,17 @@ class SO3Actor(nn.Module):
         elif conversion == 'descoteaux->tournier':
             return torch.matmul(torch.matmul(signal, self.B_desc), self.invB_tour)
         elif conversion == 'tournier->spharm':
-            return torch.matmul(torch.matmul(signal, self.B_tour), self.invB_spha)
+            # return torch.matmul(torch.matmul(signal, self.B_tour), self.invB_spha)
+            return self.sht(torch.matmul(signal, self.B_tour))
         elif conversion == 'descoteaux->spharm':
-            return torch.matmul(torch.matmul(signal, self.B_desc), self.invB_spha)
+            # return torch.matmul(torch.matmul(signal, self.B_desc), self.invB_spha)
+            return self.sht(torch.matmul(signal, self.B_desc))
         elif conversion == 'spharm->tournier':
-            return torch.matmul(torch.matmul(signal, self.B_spha), self.invB_tour)
+            # return torch.matmul(torch.matmul(signal, self.B_spha), self.invB_tour)
+            return torch.matmul(self.isht(signal), self.invB_tour)
         elif conversion == 'spharm->descoteaux':
-            return torch.matmul(torch.matmul(signal, self.B_spha), self.invB_desc)
+            # return torch.matmul(torch.matmul(signal, self.B_spha), self.invB_desc)
+            return torch.matmul(self.isht(signal), self.invB_desc)
         else:
             return ValueError
 
@@ -189,7 +203,8 @@ class SO3Actor(nn.Module):
         elif sph_basis == 'descoteaux':
             return torch.matmul(signal, self.B_desc)
         elif sph_basis == 'spharm':
-            return torch.matmul(signal, self.B_harm)
+            # return torch.matmul(signal, self.B_harm)
+            return self.isht(signal)
         else:
             return ValueError
 
@@ -208,22 +223,32 @@ class SO3Actor(nn.Module):
         return peak_dir
 
 
-    def _so3_conv_net(self, signal):
+    def _so3_conv_net(self, signal, test=False):
+
+        # TODO: remove this!!
+        # if self.callcount < 5000:
+        #     self.callcount += 1
+        #     test=True
+        # if self.callcount == 4999:
+        #     print('[!!] network starts')
+
         x = signal
 
-        # import ipdb; ipdb.set_trace()
+        if not test:
+            x = torch.cat([x[:, 0, None], x[:, -1, None]], 1) # extract only first and last
 
-        # for l_idx, layer in enumerate(self.down):
-        #     x = layer(x)
+            for l_idx, layer in enumerate(self.down):
+                x = layer(x)
 
-        # x = self.final(x)
+            x = self.final(x)
 
-        # next line dummy
-        x = self.isht(x)
-        dir_mask = (x[:, -1, None] > -.05).int()
-        x = x[:, 0, None] * dir_mask
-        x = self.sht(x)
-        x = torch.cat([x, x], 1)
+        else:
+            # next line dummy
+            x = self.isht(x)
+            dir_mask = (x[:, -1, None] > -.05).int()
+            x = x[:, 0, None] * dir_mask
+            x = self.sht(x)
+            x = torch.cat([x, x], 1)
 
         return x
 
@@ -242,7 +267,7 @@ class SO3Actor(nn.Module):
         # state = self._change_basis(state, 'descoteaux->spharm')
 
         # below: test, TODO remove
-        stochastic=False
+        # stochastic=False
         # state = self._change_basis(state, 'tournier->spharm') # should be descoteaux->spharm
 
         p = self._so3_conv_net(state)

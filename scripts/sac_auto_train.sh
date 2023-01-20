@@ -26,14 +26,14 @@ test_reference_file=$WORK_DATASET_FOLDER/raw/${TEST_SUBJECT_ID}/masks/${TEST_SUB
 
 max_ep=500 # Chosen empirically
 log_interval=50 # Log at n steps
-lr=0.0005 # (0.0005) Learning rate
+lr=0.05 # (0.0005) Learning rate
 gamma=0.75 # Gamma for reward discounting
 alpha=0.5
 
 valid_noise=0.0 # Noise to add to make a prob output. 0 for deterministic
 
-n_seeds_per_voxel=1 # (2) Seed per voxel
-max_angle=100 # (30) Maximum angle for streamline curvature
+n_seeds_per_voxel=2 # (2) Seed per voxel
+max_angle=30 # (30) Maximum angle for streamline curvature
 
 EXPERIMENT=SACAutoFiberCupTrain
 
