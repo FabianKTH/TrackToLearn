@@ -12,13 +12,21 @@ from spharmnet.core.models import Down, Final
 from spharmnet.lib.io import read_mesh
 from spharmnet.lib.sphere import spharm_real, vertex_area
 
+# deepsphere imports
+from deepsphere.utils.laplacian_funcs import get_icosahedron_laplacians
+from deepsphere.models.spherical_unet.utils import SphericalChebBN, SphericalChebBNPool
+from deepsphere.layers.chebyshev import SphericalChebConv
+from deepsphere.layers.samplings.icosahedron_pool_unpool import Icosahedron
+import pygsp as pg
+
+
 # user imports
 from TrackToLearn.algorithms.so3_helper import _init_antipod_dict
 
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-LOG_STD_MAX = -10 # (2)
+LOG_STD_MAX = -1 # (2)
 LOG_STD_MIN = -20 # (-20)
 
 
@@ -41,7 +49,9 @@ class SO3Actor(nn.Module):
         self.callcount = 0 # TODO remove, this is really dirty
 
         self._init_spharm_basis() # inits self.Y, self.Y_inv, self.area
-        self._init_spharm_conv() # inits self.isht, self.sht
+        # self._init_spharm_conv() # inits self.isht, self.sht
+        self._init_deepsphere()
+
 
 
     @staticmethod
@@ -53,9 +63,12 @@ class SO3Actor(nn.Module):
         return torch.from_numpy(x).to(device=device, dtype=dtype)
 
     def _init_spharm_basis(self):
-        sphere_dir = '/fabi_project/sphere/ico4.vtk' # TODO: dont code so hard (ico_low2.vtk)
+        # sphere_dir = '/fabi_project/sphere/ico4.vtk' # TODO: dont code so hard (ico_low2.vtk)
 
-        v, f = read_mesh(sphere_dir)
+        # v, f = read_mesh(sphere_dir)
+        v = pg.graphs.SphereIcosahedral(2**4).coords
+        f = Sphere(xyz=v).faces
+
         v = v.astype(float)
         area = vertex_area(v, f)
         Y = spharm_real(v, self.l_max, threads=1)
@@ -65,6 +78,9 @@ class SO3Actor(nn.Module):
         self.invB_spha = self.B_spha.T
         self.sphere = Sphere(xyz=v)
         self._init_dipy_basis()
+
+        self.isht = ISHT(self.B_spha)
+        self.sht = SHT(L=self.l_max, Y_inv=self.invB_spha, area=self.area)
 
 
     def _init_dipy_basis(self):
@@ -101,8 +117,7 @@ class SO3Actor(nn.Module):
 
 
         # below, new
-        self.isht = ISHT(self.B_spha)
-        self.sht = SHT(L=self.l_max, Y_inv=self.invB_spha, area=self.area)
+
         self.down = []
         self.down.append(Down(self.B_spha, self.invB_spha, self.area, 2, 32, L=self.l_max,
                               interval=1, fullband=True))
@@ -111,6 +126,13 @@ class SO3Actor(nn.Module):
         self.down = nn.ModuleList(self.down)
         self.output_activation = nn.Tanh()
 
+
+    def _init_deepsphere(self):
+        self.laps = get_icosahedron_laplacians(nodes=2562, depth=4, laplacian_type="combinatorial")
+        self.pooling_class = Icosahedron()
+
+        self.conv1 = SphericalChebBNPool(1, 8, self.laps[2], self.pooling_class.pooling, kernel_size=3)
+        self.conv2 = FinalSphericalChebBN(8, 2, self.laps[2], kernel_size=3)
 
     # @staticmethod
     def _reformat_state(self, state):
@@ -130,7 +152,7 @@ class SO3Actor(nn.Module):
         # dir_part
         dir_part = dir_part.reshape([-1, 4, 3]) # 4 directions, 3 point coefficients
         dir_part = self._dirs_to_shsignal(dir_part, self.l_max)
-        dir_part = self._sph_to_sp(dir_part, sph_basis='spharm')
+        dir_part = self._sph_to_sp(dir_part, sph_basis='tournier')  # spharm?
 
         # concat channels
         out = torch.cat([sh_part, dir_part], 1)
@@ -304,6 +326,17 @@ class SO3Actor(nn.Module):
         return x
 
 
+    def _so3_deepsphere_net(self, signal):
+        # x = torch.cat([signal[:, 0, None], signal[:, -1, None]], 1)
+        x = signal[:, 0, None]
+        x = torch.swapaxes(x, 1, 2)
+
+        x = self.conv1(x) #  self.laps[3])
+        x = self.conv2(x) #  self.laps[3])
+
+        return x
+
+
     def forward(
         self,
         state: torch.Tensor,
@@ -318,10 +351,10 @@ class SO3Actor(nn.Module):
         # state = self._change_basis(state, 'descoteaux->spharm')
 
         # below: test, TODO remove
-        # stochastic=False
+        stochastic=False
         # state = self._change_basis(state, 'tournier->spharm') # should be descoteaux->spharm
 
-        p = self._so3_conv_net2(state, test=False)
+        p = self._so3_deepsphere_net(state)
         p = self._get_direction(p, is_sp_signal=True)
 
         mu = p[:, 0]
@@ -341,7 +374,7 @@ class SO3Actor(nn.Module):
         logp_pi -= (2*(np.log(2) - pi_action -
                        F.softplus(-2*pi_action))).sum(axis=1)
 
-        pi_action = self.output_activation(pi_action)
+        # pi_action = self.output_activation(pi_action) # TODO
 
         return pi_action, logp_pi
 
@@ -365,6 +398,33 @@ class SO3Actor(nn.Module):
                        F.softplus(-2*action))).sum(axis=1)
 
         return logp_pi
+
+class FinalSphericalChebBN(nn.Module):
+    """Building Block with a Chebyshev Convolution, Batchnormalization, and ReLu activation.
+    """
+
+    def __init__(self, in_channels, out_channels, lap, kernel_size):
+        """Initialization.
+        Args:
+            in_channels (int): initial number of channels.
+            out_channels (int): output number of channels.
+            lap (:obj:`torch.sparse.FloatTensor`): laplacian.
+            kernel_size (int, optional): polynomial degree. Defaults to 3.
+        """
+        super().__init__()
+        self.spherical_cheb = SphericalChebConv(in_channels, out_channels, lap, kernel_size)
+        self.batchnorm = nn.BatchNorm1d(out_channels)
+
+    def forward(self, x):
+        """Forward Pass.
+        Args:
+            x (:obj:`torch.tensor`): input [batch x vertices x channels/features]
+        Returns:
+            :obj:`torch.tensor`: output [batch x vertices x channels/features]
+        """
+        x = self.spherical_cheb(x)
+        x = self.batchnorm(x.permute(0, 2, 1))
+        return x
 
 
 class ConvBlock(nn.Module):

@@ -99,7 +99,7 @@ class SAC(RLAlgorithm):
 
         # Optimizer for critic
         self.critic_optimizer = torch.optim.Adam(
-            self.policy.critic.parameters(), lr=lr)
+            self.policy.critic.parameters(), lr=0.0005) # TODO parameter for this
 
         # Temperature
         self.alpha = alpha
