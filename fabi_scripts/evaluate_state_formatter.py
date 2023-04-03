@@ -9,6 +9,8 @@ from TrackToLearn.environments.utils import format_state
 from TrackToLearn.algorithms.so3_actor import SO3Actor
 from TrackToLearn.environments.utils import get_neighborhood_directions
 
+import sklearn.preprocessing as preprocessing
+
 import nibabel as nib
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -36,13 +38,13 @@ def load_volume_from_dset(dataset_file, split_id):
 
 def get_sampling_coords(volume, no_subs):
     _x, _y, _z, _ = volume.shape
-    __x = np.linspace(0, _x-1, _x*no_subs -1)
-    __y = np.linspace(0, _y-1, _y*no_subs -1)
-    __z = np.linspace(0, _z-1, _z*no_subs -1)
+    # __x = np.linspace(0, _x-1, _x*no_subs -1)
+    # __y = np.linspace(0, _y-1, _y*no_subs -1)
+    # __z = np.linspace(0, _z-1, _z*no_subs -1)
 
-    # __x = np.linspace(0, _x-1, _x*no_subs )
-    # __y = np.linspace(0, _y-1, _y*no_subs )
-    # __z = np.linspace(0, _z-1, _z*no_subs )
+    __x = np.linspace(0, _x-1, _x*no_subs )
+    __y = np.linspace(0, _y-1, _y*no_subs )
+    __z = np.linspace(0, _z-1, _z*no_subs )
 
     gx, gy, gz = np.meshgrid(__x, __y, __z, indexing='ij')
     c_list = np.stack([gx, gy, gz]).reshape(3, -1)
@@ -69,8 +71,8 @@ if __name__ == '__main__':
     vol, aff = load_volume_from_dset(dset, 'training')
 
     # vol = vol[:, :vol.shape[1] //2]
-    cx, cy = 12, 17
-    vol = vol[cx-10:cx+10, cy-5:cy+5]
+    # cx, cy = 12, 17
+    # vol = vol[cx-10:cx+10, cy-5:cy+5]
 
     nib.save(nib.Nifti1Image(vol[..., :-1], aff), join(out_folder, 'input.nii.gz'))
 
@@ -78,41 +80,57 @@ if __name__ == '__main__':
 
     # test basis conversion on input
     ## first create tensor (without mask)
-    vol_tf = so3_act._tt(vol[..., :-1])
-    vol_tf = vol_tf.reshape([-1, 1, 28])
-    vol_tf_full = so3_act._pad_antipod(vol_tf)
-    vol_tf_tour = so3_act._change_basis(vol_tf_full, 'descoteaux->spharm')
+    # vol_tf = so3_act._tt(vol[..., :-1])
+    # vol_tf = vol_tf.reshape([-1, 1, 28])
+    # vol_tf_full = so3_act._pad_antipod(vol_tf)
+    # vol_tf_tour = so3_act._change_basis(vol_tf_full, 'descoteaux->spharm')
 
     # test direction from spharm getter
-    dir_tf = so3_act._get_direction(vol_tf_tour)
-    dir_tf = dir_tf.reshape([dimx, dimy, dimz, 3])
-    np.save('/fabi_project/data/scratch/dirgetter_chechs/d1_desc.npy', dir_tf.cpu().numpy())
+    # dir_tf = so3_act._get_direction(vol_tf_tour)
+    # dir_tf = dir_tf.reshape([dimx, dimy, dimz, 3])
+    # np.save('/fabi_project/data/scratch/dirgetter_chechs/d1_desc.npy', dir_tf.cpu().numpy())
 
     # test also spharm_to_direction
-    dir_tf = so3_act._get_direction(vol_tf_tour)
-    sph_dir = so3_act._dirs_to_shsignal(dir_tf)
-    sp_dir = so3_act._sph_to_sp(sph_dir, sph_basis='tournier')
-    sp_dir = sp_dir.reshape([dimx, dimy, dimz, 40962])
-    np.save('/fabi_project/data/scratch/dirgetter_chechs/sp_from_dir.npy', sp_dir.cpu().numpy())
+    # dir_tf = so3_act._get_direction(vol_tf_tour)
+    # sph_dir = so3_act._dirs_to_shsignal(dir_tf)
+    # sp_dir = so3_act._sph_to_sp(sph_dir, sph_basis='tournier')
+    # sp_dir = sp_dir.reshape([dimx, dimy, dimz, 40962])
+    # np.save('/fabi_project/data/scratch/dirgetter_chechs/sp_from_dir.npy', sp_dir.cpu().numpy())
 
-    import ipdb; ipdb.set_trace()
+    # import ipdb; ipdb.set_trace()
 
-    vol_tf_tour = vol_tf_tour.reshape([dimx, dimy, dimz, 49])
-    vol_full = vol_tf_tour.detach().cpu().numpy()
-    vol_tour = vol_full[..., np.r_[0, 4:9, 16:25, 36:49]]
+    # vol_tf_tour = vol_tf_tour.reshape([dimx, dimy, dimz, 49])
+    # vol_full = vol_tf_tour.detach().cpu().numpy()
+    # vol_tour = vol_full[..., np.r_[0, 4:9, 16:25, 36:49]]
 
-    nib.save(nib.Nifti1Image(vol_tour, aff), join(out_folder, 'input_newbasis2.nii.gz'))
-    import ipdb; ipdb.set_trace()
+    # nib.save(nib.Nifti1Image(vol_tour, aff), join(out_folder, 'input_newbasis2.nii.gz'))
+    # import ipdb; ipdb.set_trace()
     # nib.save(nib.Nifti1Image(vol[..., :-1], np.eye(4)), join(out_folder, 'input2.nii.gz'))
 
     coords = get_sampling_coords(vol, no_subsampling)
 
+    # some directions
+    x, y = np.meshgrid(np.linspace(0, dimx-1, dimx), np.linspace(0, dimy-1, dimy))
+
+    u = -(y-dimx//2)/np.sqrt((x)**2 + (y)**2)
+    v = (x-dimy//2)/np.sqrt((x)**2 + (y)**2)
+
+    u = np.repeat(u[:, :, np.newaxis], 3, axis=2)
+    v = np.repeat(v[:, :, np.newaxis], 3, axis=2)
+
+    dirs = np.stack([u, v, np.zeros_like(u)], -1).reshape([-1, 3])[:, None]
+    dirs[dirs == np.inf] = 0.
+    dirs[dirs == -np.inf] = 0.
+    dirs = preprocessing.normalize(dirs[:, 0])[:, None]
+
+    import ipdb; ipdb.set_trace()
+
     # go 1 step in uniform direction to test last_direction
     streamlines = np.concatenate((coords,
-                                  coords+np.array([1., 0., 0.]),
-                                  coords+np.array([2., 0., 0.]),
-                                  coords+np.array([3., 0., 0.]),
-                                  coords+np.array([4., 0., 0.])
+                                  coords+dirs,
+                                  coords+2*dirs,
+                                  coords+3*dirs,
+                                  coords+4*dirs
                                   ), axis=1).astype(np.float32)
     neighborhood_directions = torch.tensor(
         get_neighborhood_directions(radius=0.25), dtype=torch.float16).to(device)
@@ -120,13 +138,15 @@ if __name__ == '__main__':
     # FORMATTER CALL
     states = format_state(streamlines, so3_act._tt(vol),
                               0.25, neighborhood_directions, n_signal, n_dirs, device)
-    # states = so3_test_formatter(coords, torch.from_numpy(vol).to(device),
-    #                           None, None, n_signal, n_dirs, device)
+    states = so3_act._tt(states)
 
     # REFORMAT
-    states = so3_act._reformat_state(torch.tensor(states, device=device))
+    states = so3_act._reformat_state(states)
+    # states = so3_act._change_basis(states.float(), 'descoteaux->spharm')
+    states = torch.reshape(states, [dimx, dimy, dimz, 11, -1])
 
     # states = so3_act._change_basis(states.float(), 'descoteaux->spharm')
+    import ipdb; ipdb.set_trace()
 
     net_out = so3_act._so3_conv_net(states.float())
     dirs = so3_act._get_direction(net_out)

@@ -201,13 +201,16 @@ class Reward(object):
             sft = StatefulTractogram(streamlines, self.reference, Space.VOX)
             to_score = np.arange(len(sft))[dones]
             sub_sft = sft[to_score]
+
+            # print('before scoring fucntion call')
             VC, IC, NC = self.scoring_function(sub_sft)
+            # print('after scoring fucntion call')
 
             reward = np.zeros((streamlines.shape[0]))
             if len(VC) > 0:
                 reward[to_score[VC]] += self.target_bonus_factor
-                self.render(self.peaks, streamlines[to_score[VC]],
-                            reward[to_score[VC]])
+                # self.render(self.peaks, streamlines[to_score[VC]],
+                #             reward[to_score[VC]])
             if len(IC) > 0:
                 reward[to_score[IC]] -= self.target_bonus_factor
             if len(NC) > 0:
